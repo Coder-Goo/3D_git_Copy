@@ -1,84 +1,32 @@
 
 #include"calibration.h"
-#include"phase_unwrapping.h"
 #include"aggregation.h"
 #include"phase_unwrapping2.h"
+#include"ad_census.h"
 
 using namespace cv;
 using namespace std;
 
 Size read_file(ifstream & ifile, vector<vector<Point2f>>&imagePointVec, vector<vector<Point3f>>&realPointVec, Size&nei_jiaodian_number1, Size&square_size1);
-
-//void computeSAD(Mat &left, Mat&right, vector<Point2f>&vecL, vector<Point2f>&vecR, Size winSize);
-//void Q2pcd(Mat Q, string pcdFileName);
-////pcl::PointCloud<pcl::PointXYZ>::Ptr phaseSad2Pcd(Mat phase_left, Mat phase_right, Mat Q);
-//void phaseSad2Pcd(Mat phase_left, Mat phase_right, Mat Q); 
-void phaseSad2PcdSadonly(Mat phase_left, Mat phase_right, Mat Q);
-////第三版计算视差：SAD+CENSUS
-// void phaseSadCensus2Pcd(Mat phase_left, Mat phase_right, int min_disparity, int max_disparity, Mat Q);
-//
-inline float compute_ad_census_cost(int left_row, int left_col, int right_row, int right_col, Mat phase_left, Mat phase_right, int win_size);
-inline float compute_ad_rank_cost(int left_row, int left_col, int right_row, int right_col, Mat phase_left, Mat phase_right, int win_size);
-float GetPreciseDisparity(int best_disparity, int row, int col);
-float GetPreciseDisparityFromAD(Point2f x1, Point2f x2, Point2f x3);
-
 //标定
 int CalibrationImage();//标定
 //计算相位图
 int CalculatePhaseImage(Mat &phase_left, Mat &phase_right);
-//计算代价
-void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, const Mat &phase_right, const uchar &cost_window_size);
-//计算左视图的DSI
-void CalculateRightDsi(vector<vector<Mat>>&vec_right_dsi, const vector<vector<Mat>>&vec_aggregation_maps,const Mat& phase_left,const Mat &phase_right);
- //代价聚合
-void CostAggregation(bool fixed_window,  vector<vector<Mat>>&vec_cost_maps, vector<vector<Mat>>&vec_aggregation_maps, const Mat &phase_left, const Mat &phase_right, const uchar &aggregation_window_size);
-//视差计算
-Mat DisparityCalculation(const vector<vector<Mat>>&vec_aggregation_maps, const Mat &phase_left, const Mat &phase_right);
+Mat phaseSad2PcdSadonly(const Mat &_phase_left, const Mat &_phase_right, int );
 //AD计算视差
 Mat ADCalculateDisparity(const Mat &phase_left, const Mat &phase_right);
 //由视差计算点云
 void CalculatePointCloud(const Mat &disparity, const Mat &phase_left, const Mat &Q, String &file_name);
-
-
-
-const int INVALID_DISPARITY = 6550;
- bool dsi =false;//如果dsi为true，那么就直接使用ad来计算，否则用dsi
- bool sad = false;
- bool ad_census = true;
- bool ad_rank = false;
- bool fixed_window = true;
- String pcd_file_name = "AD点云";
-
- const int cost_window_size = 7;
- const int aggeragation_window_size = 7;
- float LMADA_AD = 1.0;
- float  LMADA_CENSUS = 70.0;
- float LMADA_RANK = 10.0;
-
- //rank阈值
- float u = 0.2;
- float v = 0.35;//设置v=0.6,u=0.3
-
- //视差范围
- const int min_disparity = -130;
- const int max_disparity = 140;
-
- //自适应窗口阈值
- const double color_threshold1 = 0.6;
- const double color_threshold2 = 0.8;
- const double color_threshold3 = 0.2;
- const int maxlength1 = 9;
- const int maxlength2 = 5;//maxlength2<maxlength1且color_threshold1>color_threshold
-
-
-
+float GetPreciseDisparity(int best_disparity, int row, int col);
+float GetPreciseDisparityFromAD(Point2f x1, Point2f x2, Point2f x3);
+String pcd_file_name = "AD点云";
 string calib_file_name = "./Calibdata.xml";
- //string calib_file_name = "输出的内外参数.yml";
-
 
 int main()
 {
-	Mat Q;//投影矩阵Q
+	bool dsi = false;
+	bool sad = false;
+	Mat Q;     //投影矩阵Q
 	//CalibrationImage();//标定
 	FileStorage fin(calib_file_name, FileStorage::READ);
 	fin["Q"] >> Q;
@@ -105,36 +53,14 @@ int main()
 	else//不使用DSI计算视差图
 	{
 		if (sad) {
-			phaseSad2PcdSadonly(phase_left, phase_right, Q);
+			Mat disparity =  phaseSad2PcdSadonly(phase_left,phase_right, 5);
 		}
 		else {
 			Mat disparity = ADCalculateDisparity(phase_left, phase_right);
 			CalculatePointCloud(disparity, phase_left, Q, pcd_file_name);
 		}
 	}
-	/*******************************************************************************************
-	* 第一版输出点云的方法，使用视差和SAD来计算
-	* 只使用SAD
-	*
-	*****************************************************/
-	//phaseSad2PcdSadonly(L_phase, R_phase,Q);
-
-	/***********************************************************************************
-	*   第二版输出点云的方法，使用视差输出点云，视差经过优化，精度更高
-	*   SAD+唯一性检测+LRC,没有亚像素精细化，因为经过左右一致性检测之后，视差图很稀疏，还没想好如何填充视差
-	*
-	**************************************************************************************/
-	//phaseSad2Pcd(L_phase, R_phase, Q);
-	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-	/**************************************************************************************
-	* 第三版输出点云的方法，
-	* SAD+CENSUS
-	******************************************************************************************/
-	//phaseSadCensus2Pcd(L_phase, R_phase, -200, 200, Q);
-	//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 	
-
 	fin.release();
 	return 0;
 }
@@ -394,312 +320,7 @@ imwrite("D:\\VS文件\\匹配main程序\\匹配main程序\\R_phase.bmp", R_phase1);*/
 	return 0;
 }
 
-//计算代价的函数，输入的vector<vector<>>是DSI,传入的是引用类型
-void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, const Mat &phase_right, const uchar &cost_window_size)//如果需要改变vector中的数据需要进行引用传参
-{
-	clock_t time_cost_computation_start, time_cost_computation_end;
-	time_cost_computation_start = clock();
-	const int height = phase_left.rows;
-	const int width = phase_left.cols;
-
-	//到时这里可以搞一个初始化函数来进行初始化
-	vec_cost_maps.resize(2);//存放一个负视差的，一个正视差的；
-	vec_cost_maps[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	vec_cost_maps[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-
-	for (int i = 0; i < vec_cost_maps.size(); i++){
-		for (int j = 0; j < vec_cost_maps[i].size(); j++){
-			vec_cost_maps[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
-		}
-	}
-
-	for (int i = 0; i < 2; i++)//进行两次循环，一次正视差，一次负视差
-	{
-		int d_length = 0;
-		if (i == 0){//第一次先进行负视差匹配
-			d_length = fabs(min_disparity);
-		}
-		else{
-			d_length = fabs(max_disparity);
-		}
-		for (int d = 0; d < d_length; d++){
-			//下面三次for循环得到disparity space image（DSI）
-			for (int row = cost_window_size / 2 + 1; row < height - cost_window_size / 2 - 1; row++){
-				for (int col = cost_window_size / 2 + 1; col < width - cost_window_size / 2 - 1; col++){//两次循环，对相位图进行逐像素
-					if (phase_left.at<float>(row, col) < 0.01){//如果左相位图的像素值为0，跳过匹配
-						continue;
-					}
-					else{
-						int col_r;
-						if (i == 0){
-							col_r = col + d;//负视差的时候，右图视差和左图视差之间的关系
-						}
-						else{
-							col_r = col - d;//正视差的时候，右图视差和左图视差之间的关系
-						}
-						if (col_r >= (width - cost_window_size / 2) || col_r <= cost_window_size / 2){
-							continue;
-						}
-						else{
-							if (phase_right.at<float>(row, col_r) < 0.01){
-								continue;
-							}
-							else{
-								if (ad_census){//使用ad_census进行代价计算	
-									vec_cost_maps[i][d].at<float>(row, col) = compute_ad_census_cost(row, col, row, col_r, phase_left, phase_right, cost_window_size);
-								}
-								if (ad_rank){//使用ad_rank进行代价计算
-									vec_cost_maps[i][d].at<float>(row, col) = compute_ad_rank_cost(row, col, row, col_r, phase_left, phase_right, cost_window_size);
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	time_cost_computation_end = clock();
-	std::cout << "代价计算用时：" << double((time_cost_computation_end - time_cost_computation_start) / CLOCKS_PER_SEC) << endl;
-}
-
-//代价聚合
-void CostAggregation(bool fixed_window,  vector<vector<Mat>>&vec_cost_maps,vector<vector<Mat>>&vec_aggregation_maps,const Mat &phase_left,const Mat &phase_right,const uchar &aggregation_window_size)
-{
-	/*cout << "代价DSI的负视差大小是"<<vec_cost_maps[0].size()<<endl;
-	cout << "代价DSI的正视差大小是" << vec_cost_maps[1].size() << endl;*/
-	/******************************************///到时这里可以搞一个初始化函数来进行初始化
-	vec_aggregation_maps.resize(2);//存放一个负视差的，一个正视差的；
-	vec_aggregation_maps[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	vec_aggregation_maps[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-
-	for (int i = 0; i < vec_cost_maps.size(); i++){
-		for (int j = 0; j < vec_cost_maps[i].size(); j++){
-			vec_aggregation_maps[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
-		}
-	}
-
-	const int height = phase_left.rows;
-	const int width = phase_left.cols;
-
-	if (fixed_window == true){	//使用固定窗口
-
-		clock_t time_Faggregation_start, time_Faggregation_end;
-		time_Faggregation_start = clock();
-		for (int i = 0; i < 2; i++){//进行两次循环，一次正视差，一次负视差
-			int d_length = 0;
-			if (i == 0){//第一次先进行负视差匹配
-				d_length = fabs(min_disparity);
-			}
-			else{
-				d_length = fabs(max_disparity);
-			}
-			for (int d = 0; d < d_length; d++){
-				for (int row = aggregation_window_size / 2 + 1; row < height - aggregation_window_size / 2 - 1; row++){
-					for (int col = aggregation_window_size / 2 + 1; col < width - aggregation_window_size / 2 - 1; col++){//两次循环，对相位图进行逐像素
-						if (vec_cost_maps[i][d].at<float>(row, col) < 0.01){
-							continue;
-						}
-							else{
-								Mat kernel = vec_cost_maps[i][d](Rect(col - aggregation_window_size / 2, row - aggregation_window_size / 2, aggregation_window_size, aggregation_window_size));
-								Scalar value = sum(kernel);
-								float temp_value = value[0];
-								vec_aggregation_maps[i][d].at<float>(row, col) = temp_value;
-							}
-					}
-				}
-			}
-		}
-		time_Faggregation_end = clock();
-		std::cout << "固定窗口代价聚合用时：" << double((time_Faggregation_end - time_Faggregation_start) / CLOCKS_PER_SEC) << endl;
-	}
-
-	//使用自适应窗口
-	else{
-		clock_t time_ADaggregation_start, time_ADaggregation_end;
-		time_ADaggregation_start = clock();
-		Aggregation aggregation(phase_left, phase_right, color_threshold1, color_threshold2, color_threshold3, maxlength1, maxlength2);
-		for (int i = 0; i < 2; i++){//进行两次循环，一次正视差，一次负视差
-			int d_length = 0;
-			if (i == 0){//第一次先进行负视差匹配
-				d_length = fabs(min_disparity);
-			}
-			else{
-				d_length = fabs(max_disparity);
-			}
-			for (int d = 0; d < d_length; d++){
-				vec_aggregation_maps[i][d]=aggregation.Aggregation2D(vec_cost_maps[i][d],true, i);
-			}
-		}
-		time_ADaggregation_end = clock();
-		std::cout << "自适应窗口聚算用时：" << double((time_ADaggregation_end - time_ADaggregation_start) / CLOCKS_PER_SEC) << endl;
-	}
-}
-
-//计算右视图的DSI用来左右一致性检查
-void CalculateRightDsi(vector<vector<Mat>>&vec_right_dsi,const vector<vector<Mat>>&vec_aggregation_maps,const Mat &phase_left,const Mat&phase_right)
-{
-	clock_t start, end;
-	start = clock();
-	//右视差图的DSI
-	vec_right_dsi.resize(2);//存放一个负视差的，一个正视差的；
-	vec_right_dsi[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	vec_right_dsi[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-	for (int i = 0; i < vec_right_dsi.size(); i++){
-		for (int j = 0; j < vec_right_dsi[i].size(); j++){
-			vec_right_dsi[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
-		}
-	}
-
-	for (int i = 0; i < 2; i++){//进行两次循环，一次正视差，一次负视差
-		int d_length = 0;
-		if (i == 0){//第一次先进行负视差匹配
-			d_length = fabs(min_disparity);
-		}
-		else{
-			d_length = fabs(max_disparity);
-		}
-		for (int d = 0; d < d_length; d++){
-			for (int row = 0 ; row < phase_left.rows; row++){
-				for (int col = 0; col < phase_left.cols; col++){//两次循环，对相位图进行逐像素
-					if (phase_right.at<float>(row, col) < 0.0001){
-						continue;
-					}
-					if (i == 0){//i=0是视差为负的情况
-						if ((col - d > 0) && (col - d < phase_left.cols)){
-							if (phase_left.at<float>(row, col - d)<0.000001){//如果左边是无效区域，那么直接跳过
-								continue;
-							}
-							vec_right_dsi[i][d].at<float>(row, col) = vec_aggregation_maps[i][d].at<float>(row, col - d);
-						}
-						else{
-							continue;
-						}
-					}
-					else {//i=1是视差为正的情况
-						if ((col + d > 0) && (col + d < phase_left.cols)){//保证仍处于图像区域内
-							if (phase_left.at<float>(row, col + d) < 0.01){//如果左边是无效区域，那么直接跳过
-								continue;
-							}
-							vec_right_dsi[i][d].at<float>(row, col) = vec_aggregation_maps[i][d].at<float>(row, col + d);
-						}
-						else{
-							continue;
-						}
-					}				
-				}
-			}
-		}
-	}
-	end = clock();
-	std::cout << "计算右视图DSI用时：" << double((end - start) / CLOCKS_PER_SEC) << endl;
-}
-
-//由聚合的DSI计算视差
-Mat DisparityCalculation(const vector<vector<Mat>>&vec_maps,const Mat &phase_left,const Mat &phase_right)
-{
-	Mat disparity;
-	clock_t time_disparity_computation_start, time_disparity_computation_end;
-	time_disparity_computation_start = clock();
-	disparity = Mat::zeros(phase_left.size(), CV_32FC1);
-
-	Mat cost_map = Mat::zeros(phase_left.size(), CV_32FC1);
-
-	const int height = phase_left.rows;
-	const int width = phase_left.cols;
-	//视差计算
-	int d_length = 0;
-	int best_disparity = INVALID_DISPARITY;
-
-	for (int row = 0; row < height; row++){
-		for (int col = 0; col < width; col++){
-			float cost_value = 1000000;
-			if (phase_left.at<float>(row, col) < 0.01){
-				continue;
-			}
-			else{
-				for (int i = 0; i < 2; i++){
-					if (i == 0){
-						d_length = abs(min_disparity);
-					}
-					else{
-						d_length = abs(max_disparity);
-					}
-					for (int d = 0; d < d_length; d++){
-						if ((vec_maps[i][d].at<float>(row, col) < 0.00001)){
-							continue;
-						}
-						else{
-							if (vec_maps[i][d].at<float>(row, col) < cost_value){
-								cost_value = vec_maps[i][d].at<float>(row, col);
-								if (i == 0){
-									best_disparity = -d;
-								}
-								else{
-									best_disparity = d;
-								}
-							}
-						}
-					}
-				}
-			}
-			////////////////////////////////////////////////////////////////////////
-			if (best_disparity == INVALID_DISPARITY){//如果视差仍属于初始值，那么应该是位于无效区域
-				continue;
-			}
-			disparity.at<float>(row, col) = best_disparity;//没哟进行视差精细化
-
-/******************************************************视差精细化**********************************************/
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-			//else//进行亚像素视差精细化
-			//{
-			//	if (best_disparity == 0)//如果最佳视差为0，那么它位于正负视差交界处，需特殊处理
-			//	{
-			//		if (vec_maps[0].size() < 2)//如果没有负视差，那么直接赋值0
-			//		{
-			//			disparity.at<float>(row, col) =0.0;
-			//			continue;
-			//		}
-			//		float c1 = vec_maps[0][1].at<float>(row, col);
-			//		float c2 = vec_maps[0][0].at<float>(row, col);
-			//		float c3 = vec_maps[1][1].at<float>(row, col);
-			//		disparity.at<float>(row, col) = -(c3 - c1) / (c3 + c1 - 2 * c2) / 2;
-			//	}
-			//	else
-			//	{
-			//		if ((best_disparity > 0) && ((best_disparity + 1) < max_disparity))//正视差
-			//		{
-			//			float c1 = vec_maps[1][best_disparity - 1].at<float>(row, col);
-			//			float c2 = vec_maps[1][best_disparity].at<float>(row, col);
-			//			float c3 = vec_maps[1][best_disparity + 1].at<float>(row, col);
-			//			disparity.at<float>(row, col) = best_disparity - (c3 - c1) / (c3 + c1 - 2 * c2) / 2;
-			//		}
-			//		else if ((best_disparity < 0) && (abs(best_disparity - 1) <abs( min_disparity)))//负视差
-			//		{
-			//			float c1 = vec_maps[0][abs(best_disparity -1)].at<float>(row, col);
-			//			float c2 = vec_maps[0][abs(best_disparity)].at<float>(row, col);
-			//			float c3 = vec_maps[0][abs(best_disparity + 1)].at<float>(row, col);
-			//			disparity.at<float>(row, col) = best_disparity - (c3 - c1) / (c3 + c1 - 2 * c2) / 2;
-			//		}
-			//		else
-			//		{
-			//			disparity.at<float>(row, col) = best_disparity;
-			//			continue;
-			//		}
-
-			//	}
-			//}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/****************************************************视差精细化结束**************************************************************/
-		}
-	}
-	time_disparity_computation_end = clock();
-	std::cout << "从DSI得到视差图用时：" << double((time_disparity_computation_end - time_disparity_computation_start) / CLOCKS_PER_SEC) << endl;
-	return disparity.clone();
-}
-
-
+//AD+THRESHOLD
 Mat ADCalculateDisparity( const Mat &phase_left,const  Mat &phase_right)
 {
 	clock_t time_start, time_end;
@@ -739,7 +360,101 @@ Mat ADCalculateDisparity( const Mat &phase_left,const  Mat &phase_right)
 	return disparity;
 }
 
+/**********************************************************************
+/*
+* 这个是只有SAD，没有唯一性检测和LRC
+* 
+*************************************************************************/
+Mat phaseSad2PcdSadonly(const Mat &_phase_left, const Mat &_phase_right, int sad_win_size = 5)
+{
+	clock_t time_start, time_end;
+	time_start = clock();
+	Mat phase_left = _phase_left.clone();
+	Mat phase_right = _phase_right.clone();
+
+	int width = phase_left.cols;
+	int height = phase_left.rows;
+
+	Mat disparity = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
+	Mat aggre_phase_left = Mat::zeros(phase_left.size(), CV_32FC1);
+	Mat aggre_phase_right = Mat::zeros(phase_left.size(), CV_32FC1);
+	/****************由于SAD的特殊性，先聚合再匹配****************************************************************/
+	for (int row = 0; row < height; row++){
+		for (int col = 0; col < width; col++){
+			/***************************************************************************************/
+			//这一步是必须的，因为在下面sum取窗口的时候会出错，输入的相位图在小于0的像素值为-4.32×10^8，求和就不对了
+			if (phase_left.at<float>(row, col) < 0.01){
+				phase_left.at<float>(row, col) = 0;
+			}
+			if (phase_right.at<float>(row, col) < 0.01){
+				phase_right.at<float>(row, col) = 0;
+			}
+		}
+	}
+
+	//针对上述问题，把左右两幅图像的聚合改为各自聚合
+	for (int row = sad_win_size / 2; row < height- sad_win_size / 2; row++){
+		for (int col = sad_win_size / 2; col < width- sad_win_size / 2; col++){
+			if (phase_left.at<float>(row,col)<0.01){//如果处于边界或像素值为0，则跳过
+				continue;
+			}
+			else{
+				Mat kernel_left = phase_left(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
+				Scalar temp_left = sum(kernel_left);
+				aggre_phase_left.at<float>(row, col) = temp_left[0];
+			}
+		}
+	}
+	for (int row = sad_win_size / 2; row < height - sad_win_size / 2; row++) {
+		for (int col = sad_win_size / 2; col < width - sad_win_size / 2; col++) {
+			if (phase_right.at<float>(row, col) < 0.01) {//如果处于边界或像素值为0，则跳过
+				continue;
+			}
+			else{
+				Mat kernel_right = phase_right(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
+				Scalar temp_right = sum(kernel_right);
+				aggre_phase_right.at<float>(row, col) = temp_right[0];
+			}
+		}
+	}
+	/*****************************************下面开始计算视差***********************************/
+	for (int row = 0; row < height; row++){//左相机视差图{
+		int start_coordinate = 0;//如果（row,col）的视差为d=col-k(row,k)，则（row,col+1）的视差一定在(row,k)的右边。
+		for (int col = 0; col < width; col++){
+			if (aggre_phase_left.at<float>(row, col) < 0.01){
+				continue;
+			}
+			else{
+				float min_cost_value = 20000;//随便指定的一个比较大的数
+				float best_disparity = -1000;
+				int a = row;
+				int b = col;
+				for (int k = start_coordinate; k < width; k++){//在同一个y坐标进行最佳视差搜索
+					if (aggre_phase_right.at<float>(row, k) < 0.01){//如果右边视差为0，跳过该点
+						continue;
+					}
+					else{
+						float temp_value = fabs(aggre_phase_left.at<float>(row, col) - aggre_phase_right.at<float>(row, k));
+						if (temp_value < min_cost_value){
+							min_cost_value = temp_value;
+							best_disparity = col - k;
+						}
+					}
+				}
+				if (best_disparity != -1000){
+					disparity.at<float>(row, col) = best_disparity;
+				}
+			}		
+		}
+	}
+	time_end = clock();
+	std::cout << "从SAD计算得到视差图用时：" << double((time_end - time_start) / CLOCKS_PER_SEC) << endl;
+	return disparity;
+}
+
+
 //亚像素精细化
+
 float GetPreciseDisparityFromAD(Point2f x1, Point2f x2, Point2f x3)
 {
 	float c1 = x1.y;
@@ -754,10 +469,8 @@ float GetPreciseDisparityFromAD(Point2f x1, Point2f x2, Point2f x3)
 	return res;
 }
 
-
-
 //从视差图计算点云
-void CalculatePointCloud(const Mat &disparity,const Mat & phase_left,const Mat &Q,String &file_name)
+void CalculatePointCloud(const Mat &disparity, const Mat & phase_left, const Mat &Q, String &file_name)
 {
 	pcl::PointCloud<pcl::PointXYZ>points_cloud;
 	clock_t time_2piont_cloud_start, time_2point_cloud_end;
@@ -795,951 +508,7 @@ void CalculatePointCloud(const Mat &disparity,const Mat & phase_left,const Mat &
 	cout << "从视差图得到点云图用时：" << double((time_2point_cloud_end - time_2piont_cloud_start) / CLOCKS_PER_SEC);
 	points_cloud.width = points_cloud.points.size();
 	points_cloud.height = 1;
-	pcl::io::savePCDFile(file_name +".pcd", points_cloud);
-}
-
-
-
-///**********************************************************************************************************
-//* 第三版计算视差的函数 ，代价计算使用SAD+CENSUS
-//* 对左右相位图先代价计算—>取窗口聚合—>取左右差值最小得粗视差—>唯一性检测—>左右一致性检查得到LRCZ_map_disparity_right—>输出点云
-//*function: 从相位图中计算视差，然后由视差得到点云数据
-//* input：   phase1——左相机绝对相位图
-//*           phase2——右相机绝对相位图
-//* output：  输出点云XYZ数据坐标
-//* history:  2020,7.26
-//***********************************************************************************************************/
-////pcl::PointCloud<pcl::PointXYZ>::Ptr phaseSad2Pcd(Mat phase_left, Mat phase_right, Mat Q)
-void phaseSadCensus2Pcd(Mat phase_left, Mat phase_right, int min_disparity, int max_disparity, Mat Q)
-{
-	/*Mat cost_map_left = Mat::zeros(phase_left.size(), CV_32FC1);
-	Mat cost_map_right = Mat::zeros(phase_left.size(), CV_32FC1);*/
-	const int width = phase_left.cols;
-	const int height = phase_left.rows;
-	int sad_win_size = 11;
-
-	Mat map_disparity_left = Mat::zeros(phase_left.size(), CV_32FC1);//视差图
-	//Mat map_disparity_right = Mat::zeros(phase_left.size(), CV_32FC1);//视差图
-	//Mat LRC_map_disparity_right = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
-
-	//pcl::PointCloud<pcl::PointXYZ>::Ptr points_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::PointCloud<pcl::PointXYZ>points_cloud;
-
-	vector<vector<Mat>>vec_cost_disparity_maps;//DSI
-	vec_cost_disparity_maps.resize(2);//存放一个负视差的，一个正视差的；
-	vec_cost_disparity_maps[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	vec_cost_disparity_maps[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-	
-	for(int i = 0; i < vec_cost_disparity_maps.size(); i++)
-	{
-		for (int j = 0; j < vec_cost_disparity_maps[i].size(); j++)
-		{
-			vec_cost_disparity_maps[i][j]=Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
-		}
-	}
-
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			if (phase_left.at<float>(row, col) < 0.01)
-			{
-				phase_left.at<float>(row, col) = 0;
-			}
-		}
-	}
-
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			if (phase_right.at<float>(row, col) < 0.01)
-			{
-				phase_right.at<float>(row, col) = 0;
-			}
-		}
-	}
-
-	/***********************************************代价计算*********************************************************************/
-	clock_t time_cost_computation_start, time_cost_computation_end;
-	time_cost_computation_start = clock();
-	//先进行代价计算：
-	for (int i = 0; i < 2; i++)//进行两次循环，一次正视差，一次负视差
-	{
-		int d_length = 0;
-		if (i == 0)//第一次先进行负视差匹配
-		{
-			d_length = fabs(min_disparity);
-		}
-		else
-		{
-			d_length = fabs(max_disparity);
-		}
-		for (int d = 0; d < d_length; d++)
-		{
-			//下面三次for循环得到disparity space image（DSI）
-			for (int row = sad_win_size / 2+1; row < height - sad_win_size / 2-1; row++)
-			{
-				for (int col = sad_win_size / 2+1; col < width - sad_win_size / 2-1; col++)//两次循环，对相位图进行逐像素
-				{
-
-					if (phase_left.at<float>(row, col) < 0.01)//如果左相位图的像素值为0，跳过匹配
-					{
-						continue;
-					}
-					else
-					{
-
-						int col_r;
-
-						if (i == 0)
-						{
-							col_r = col + d;//负视差的时候，右图视差和左图视差之间的关系
-						}
-						else
-						{
-							col_r = col - d;//正视差的时候，右图视差和左图视差之间的关系
-						}
-						int aaaa = row;
-						int bbbb = col;
-						if (phase_right.at<float>(row, col_r) < 0.01)
-						{
-							continue;
-						}
-						else
-						{
-							vec_cost_disparity_maps[i][d].at<float>(row, col) = compute_ad_census_cost(row, col, row, col_r, phase_left, phase_right, sad_win_size);
-						/*	float aa = compute_sad_census_cost(row, col, row, col_r, phase_left, phase_right, sad_win_size);
-							int lll = 0;*/
-						}
-
-					}
-				}
-
-			}
-
-		}
-		
-	}
-	time_cost_computation_end = clock();
-	cout << "代价计算用时：" << double((time_cost_computation_end - time_cost_computation_start) / CLOCKS_PER_SEC)<<endl;
-	/*********************************************************************代价计算结束***************************************************/
-	
-	Mat dst01 = vec_cost_disparity_maps[0][0];
-	Mat dst02 = vec_cost_disparity_maps[0][20];
-	Mat dst03 = vec_cost_disparity_maps[0][30];
-	Mat dst04 = vec_cost_disparity_maps[0][40];
-	Mat dst05 = vec_cost_disparity_maps[0][50];
-	Mat dst06 = vec_cost_disparity_maps[0][60];
-	Mat dst07 = vec_cost_disparity_maps[0][70];
-	Mat dst08 = vec_cost_disparity_maps[0][80];
-	Mat dst09 = vec_cost_disparity_maps[0][90];
-	Mat dst10 = vec_cost_disparity_maps[0][95];
-
-
-	Mat dst11 = vec_cost_disparity_maps[1][10];
-	Mat dst12 = vec_cost_disparity_maps[1][20];
-	Mat dst13 = vec_cost_disparity_maps[1][30];
-	Mat dst14 = vec_cost_disparity_maps[1][40];
-	Mat dst15 = vec_cost_disparity_maps[1][50];
-	Mat dst16 = vec_cost_disparity_maps[1][60];
-	Mat dst17 = vec_cost_disparity_maps[1][70];
-	Mat dst18 = vec_cost_disparity_maps[1][80];
-	Mat dst19 = vec_cost_disparity_maps[1][90];
-	Mat dst20 = vec_cost_disparity_maps[1][95];
- 	int a1111 = 0;
-
-	/*********************************计算积分图*****************************************************88*/
-	//积分图的定义
-	clock_t time_integral_image_start, time_integral_image_end;
-	time_integral_image_start = clock();
-
-	vector<vector<Mat>>integral_images;//积分图矩阵
-	integral_images.resize(2);//存放一个负视差的，一个正视差的；因为vector下标不支持负数的索引
-	integral_images[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	integral_images[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-	for (int i = 0; i < integral_images.size(); i++)
-	{
-		for (int j = 0; j < integral_images[i].size(); j++)
-		{
-			integral_images[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个积分图图的大小和输入相位图一样
-		}
-	}
-
-	for (int i = 0; i < 2; i++)//进行两次循环，一次正视差，一次负视差
-	{
-		int d_length = 0;
-		if (i == 0)//第一次先进行负视差匹配
-		{
-			d_length = fabs(min_disparity);
-		}
-		else
-		{
-			d_length = fabs(max_disparity);
-		}
-		for (int d = 0; d < d_length; d++)
-		{
-			//下面三次for循环得到积分图
-			for (int row = sad_win_size / 2 + 1; row < height - sad_win_size / 2 - 1; row++)
-			{
-				for (int col = sad_win_size / 2 + 1; col < width - sad_win_size / 2 - 1; col++)//两次循环，对相位图进行逐像素
-				{
-					//第一步，计算水平积分图
-					//第二步，根据水平积分图，根据q点的水平臂长先计算q点的水平代价聚合E
-					//第三步，把水平代价聚合当做输入，得到竖直积分图S
-					//第四步，由竖直积分图S得到代价值
-						
-				}
-
-			}
-
-		}
-
-	}
-	time_integral_image_end = clock();
-	cout << "计算积分图用时：" << double((time_integral_image_end - time_integral_image_start) / CLOCKS_PER_SEC) << endl;
-	
-
-	/******************************************************************************************8*/
-	
-	//代价聚合矩阵的定义
-	vector<vector<Mat>>aggregate_vec_cost_disparity_maps;//DSI
-	aggregate_vec_cost_disparity_maps.resize(2);//存放一个负视差的，一个正视差的；因为vector下标不支持负数的索引
-	aggregate_vec_cost_disparity_maps[0].resize(abs(min_disparity) + 1);//最小视差数加一个0视差
-	aggregate_vec_cost_disparity_maps[1].resize(abs(max_disparity) + 1);//最大视差数加一个0视差
-	for (int i = 0; i < aggregate_vec_cost_disparity_maps.size(); i++)
-	{
-		for (int j = 0; j < aggregate_vec_cost_disparity_maps[i].size(); j++)
-		{
-			aggregate_vec_cost_disparity_maps[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
-		}
-	}
-
-
-
-	///////***************888888888888888888888888888888888888888888**********************************************8888888888888888888888888888888
-	/////*********************************************************************第二种聚合方法，使用自适应窗口*******************************************/
-	clock_t time_aggregation_start, time_aggregation_end;
-	time_aggregation_start = clock();
-	Aggregation aggregation(phase_left, phase_right, 1.2, 0.6, 0.3,11, 7);
-	for (int i = 0; i < 2; i++)//进行两次循环，一次正视差，一次负视差
-	{
-		int d_length = 0;
-		if (i == 0)//第一次先进行负视差聚合
-		{
-			d_length = fabs(min_disparity);
-		}
-		else
-		{
-			d_length = fabs(max_disparity);
-		}
-		//下面三次for循环得到分别对视差进行聚合
-		for (int d = 0; d < d_length; d++)
-		{
-			for (int row = sad_win_size / 2; row < height - sad_win_size / 2; row++)
-			{
-				for (int col = sad_win_size / 2; col < width - sad_win_size / 2; col++)//两次循环，对相位图进行逐像素聚合
-				{
-					if (vec_cost_disparity_maps[i][d].at<float>(row, col) < 0.000001)//如果左相位图的像素值为0，跳过匹配
-					{
-						continue;
-					}
-					else
-					{
-						aggregation.Aggregation2D(vec_cost_disparity_maps[i][d], true, 0);
-
-					}
-
-				}
-
-			}
-		}
-	}
-	time_aggregation_end = clock();
-	cout << "代价聚合用时：" << double((time_aggregation_end - time_aggregation_start) / CLOCKS_PER_SEC);
-	///////***************************************************88888888888888888888888888888888第二种聚合方法到此结束******************************************************************************************
-
-
-	///////***************888888888888888888888888888888888888888888**********************************************8888888888888888888888888888888
-	/////*********************************************************************第一种聚合方法，使用固定窗口*******************************************/
-	//for (int i = 0; i < 2; i++)//进行两次循环，一次正视差，一次负视差
-	//{
-	//	int d_length = 0;
-	//	if (i == 0)//第一次先进行负视差聚合
-	//	{
-	//		d_length = fabs(min_disparity);
-	//	}
-	//	else
-	//	{
-	//		d_length = fabs(max_disparity);
-	//	}
-	//	//下面三次for循环得到分别对视差进行聚合
-	//	for (int d = 0; d < d_length; d++)
-	//	{
-	//		for (int row = sad_win_size / 2; row < height - sad_win_size / 2; row++)
-	//		{
-	//			for (int col = sad_win_size / 2; col < width - sad_win_size / 2; col++)//两次循环，对相位图进行逐像素聚合
-	//			{
-	//				if (vec_cost_disparity_maps[i][d].at<float>(row, col) < 0.000001)//如果左相位图的像素值为0，跳过匹配
-	//				{
-	//					continue;
-	//				}
-	//				else
-	//				{
-	//					Mat kernel = vec_cost_disparity_maps[i][d](Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
-	//					Scalar value = sum(kernel);
-	//					float temp_value = value[0];
-	//					aggregate_vec_cost_disparity_maps[i][d].at<float>(row, col) = temp_value;
-
-	//				}
-
-	//			}
-
-	//		}
-	//	}
-	//}
-	///////***************************************************88888888888888888888888888888888第一种聚合方法到此结束******************************************************************************************
-
-
-	Mat aggregate_dst01 = aggregate_vec_cost_disparity_maps[0][0];
-	Mat aggregate_dst02 = aggregate_vec_cost_disparity_maps[0][20];
-	Mat aggregate_dst03 = aggregate_vec_cost_disparity_maps[0][30];
-	Mat aggregate_dst04 = aggregate_vec_cost_disparity_maps[0][40];
-	Mat aggregate_dst05 = aggregate_vec_cost_disparity_maps[0][50];
-	Mat aggregate_dst06 = aggregate_vec_cost_disparity_maps[0][60];
-	Mat aggregate_dst07 = aggregate_vec_cost_disparity_maps[0][70];
-	Mat aggregate_dst08 = aggregate_vec_cost_disparity_maps[0][80];
-	Mat aggregate_dst09 = aggregate_vec_cost_disparity_maps[0][90];
-	Mat aggregate_dst10 = aggregate_vec_cost_disparity_maps[0][95];
-
-
-	Mat aggregate_dst11 = aggregate_vec_cost_disparity_maps[1][10];
-	Mat aggregate_dst12 = aggregate_vec_cost_disparity_maps[1][20];
-	Mat aggregate_dst13 = aggregate_vec_cost_disparity_maps[1][30];
-	Mat aggregate_dst14 = aggregate_vec_cost_disparity_maps[1][40];
-	Mat aggregate_dst15 = aggregate_vec_cost_disparity_maps[1][50];
-	Mat aggregate_dst16 = aggregate_vec_cost_disparity_maps[1][60];
-	Mat aggregate_dst17 = aggregate_vec_cost_disparity_maps[1][70];
-	Mat aggregate_dst18 = aggregate_vec_cost_disparity_maps[1][80];
-	Mat aggregate_dst19 = aggregate_vec_cost_disparity_maps[1][90];
-	Mat aggregate_dst20 = aggregate_vec_cost_disparity_maps[1][95];
-
-	clock_t time_disparity_computation_start, time_disparity_computation_end;
-	time_disparity_computation_start = clock();
-	//视差计算
-	int d_length = 0;
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			float cost_value = 1000000;
-
-			if (phase_left.at<float>(row, col) < 0.01)
-			{
-				continue;
-			}
-			else
-			{
-				for (int i = 0; i < 2; i++)
-				{
-					if (i == 0)
-					{
-						d_length = fabs(min_disparity);
-					}
-					else
-					{
-						d_length = fabs(max_disparity);
-					}
-
-					for (int d = 0; d < d_length; d++)
-					{
-
-						if ((aggregate_vec_cost_disparity_maps[i][d].at<float>(row, col) < 0.00001))
-						{
-							continue;
-						}
-						else
-						{
-							if (aggregate_vec_cost_disparity_maps[i][d].at<float>(row, col) < cost_value)
-							{
-								cost_value = aggregate_vec_cost_disparity_maps[i][d].at<float>(row, col);
-								if (i == 0)
-								{
-									map_disparity_left.at<float>(row, col) = -d;
-								}
-								else
-								{
-									map_disparity_left.at<float>(row, col) = d;
-								}
-							}
-
-						}
-					}
-
-				}
-
-			}
-
-		}
-	}
-	time_disparity_computation_end = clock();
-	cout << "从DSI得到视差图用时：" << double((time_disparity_computation_end - time_disparity_computation_start) / CLOCKS_PER_SEC) << endl;
-
-	clock_t time_2piont_cloud_start, time_2point_cloud_end;
-	time_2piont_cloud_start = clock();
-	//下面是由视差图计算点云
-	for (int col = 0; col < width; col++)
-	{
-		for (int row = 0; row < height; row++)
-		{
-			if (map_disparity_left.at<float>(row, col) == 0)
-			{
-				continue;
-			}
-			else
-			{
-				//计算点云XYZ
-				pcl::PointXYZ tep_points;
-				Vec4d xyd1 = Vec4d(row, col, map_disparity_left.at<float>(row, col), 1);
-				Matx44d _Q;
-				Q.convertTo(_Q, CV_64F);
-				Vec4d XYZW = _Q * xyd1;
-				tep_points.x = XYZW[0] / XYZW[3];
-				tep_points.y = XYZW[1] / XYZW[3];
-				tep_points.z = XYZW[2] / XYZW[3];
-				//points_cloud->points.push_back(tep_points);
-				points_cloud.points.push_back(tep_points);
-			}
-
-		}
-	}
-	time_2point_cloud_end = clock();
-	cout << "从视差图得到点云图用时：" << double((time_2point_cloud_end - time_2piont_cloud_start) / CLOCKS_PER_SEC);
-
-
-	/*points_cloud->width = points_cloud->points.size();
-	points_cloud->height = 1;
-	pcl::io::savePCDFile("cloud2.pcd", *points_cloud);*/
-	points_cloud.width = points_cloud.points.size();
-	points_cloud.height = 1;
-	pcl::io::savePCDFile("phone_SadRank.pcd", points_cloud);
-	//return points_cloud;
-}
-
-///**********************************************************************************************************
-//* 第二版计算视差的SAD函数 
-//* 对左右相位图先取窗口聚合—>取左右差值最小得粗视差—>唯一性检测—>左右一致性检查得到LRCZ_map_disparity_right—>输出点云
-//*function: 从相位图中计算视差，然后由视差得到点云数据
-//* input：   phase1——左相机绝对相位图
-//*           phase2——右相机绝对相位图
-//* output：  输出点云XYZ数据坐标
-//* history:  2020,7.26
-//***********************************************************************************************************/
-////pcl::PointCloud<pcl::PointXYZ>::Ptr phaseSad2Pcd(Mat phase_left, Mat phase_right, Mat Q)
- void phaseSad2Pcd(Mat phase_left, Mat phase_right, Mat Q)
-{
-	Mat cost_map_left=Mat::zeros(phase_left.size(), CV_32FC1);
-	Mat cost_map_right=Mat::zeros(phase_left.size(), CV_32FC1);
-	int width = phase_left.cols;
-	int height = phase_left.rows;
-	int sad_win_size = 5;
-
-	Mat map_disparity_left=Mat::zeros(phase_left.size(),CV_32FC1);//视差图
-	Mat map_disparity_right = Mat::zeros(phase_left.size(), CV_32FC1);//视差图
-	Mat LRC_map_disparity_right = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
-
-    //pcl::PointCloud<pcl::PointXYZ>::Ptr points_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::PointCloud<pcl::PointXYZ>points_cloud;
-
-	/****************由于SAD的特殊性，先聚合再匹配****************************************************************/
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			/***************************************************************************************/
-			//这一步是必须的，因为在下面sum取窗口的时候会出错，输入的相位图在小于0的像素值为-4.32×10^8，求和就不对了
-			if (phase_left.at<float>(row, col) < 0.01)
-			{
-				phase_left.at<float>(row, col) = 0;
-			}
-			if (phase_right.at<float>(row, col) < 0.01)
-			{
-				phase_right.at<float>(row, col) = 0;
-			}
-		}
-	}
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			/****************************************************************************************************/
-
-			bool out = ((row - sad_win_size / 2) <= 0 || (row + sad_win_size / 2) >= height || (col - sad_win_size / 2) <= 0 || (col + sad_win_size / 2) >= width);
-
-			/*计算左边的SAD,由于SAD的特殊性，先聚合再相减*/
-			bool zero_left = (phase_left.at<float>(row, col)< 0.01);
-			if (out || zero_left)//如果处于边界或像素值为0，则跳过
-			{
-				continue;
-			}
-			else
-			{
-				Mat kernel_left = phase_left(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
-				Scalar temp_left = sum(kernel_left);
-				cost_map_left.at<float>(row, col) = temp_left[0];
-			}
-		}
-	}
-
-	/*计算右边的SAD，先聚合*/
-	for (int row = 0; row < height; row++)
-	{
-		for (int col = 0; col < width; col++)
-		{
-			bool out = ((row - sad_win_size / 2) <= 0 || (row + sad_win_size / 2) >= height || (col - sad_win_size / 2) <= 0 || (col + sad_win_size / 2) >= width);
-		
-			bool zero_right =( phase_right.at<float>(row, col) <0.01);
-			if (out || zero_right)//如果处于边界或像素值为0，则跳过
-			{
-				continue;
-			}
-			else
-			{
-				Mat kernel_right = phase_right(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
-				Scalar temp_right = sum(kernel_right);
-				cost_map_right.at<float>(row, col) = temp_right[0];
-			}
-		}
-	}
-
-	/*****************************************下面开始计算视差***********************************/
-	/**********************************先计算左相机视差图，再计算右相机视差图**************************************/
- 	
-	for (int row = 0; row < height; row++)//左相机视差图
-
-	{
-		int start_coordinate = 0;//如果（row,col）的视差为d=col-k(row,k)，则（row,col+1）的视差一定在(row,k)的右边。
-
-		for (int col = 0; col < width; col++)
-		{
-			if (cost_map_left.at<float>(row, col) < 0.01)
-			{
-				continue;
-			}
-			else
-			{
-				float min_cost_value=20000;//随便指定的一个比较大的数
-				float best_disparity=0;
-				float sec_min_cost = 20000;
-				float sec_best_disparity=0;
-
-				
-				for (int k = start_coordinate; k < width; k++)//在同一个y坐标进行最佳视差搜索
-				{
-				    if (cost_map_right.at<float>(row, k) < 0.01)//如果右边视差为0，跳过该点
-					{
-						continue;
-					}
-					else
-					{
-						float temp_value = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, k));
-						if (temp_value < min_cost_value)
-						{
-							min_cost_value = temp_value;
-							best_disparity = col - k;
-							//point = Point2f(k, row);
-							
-						}
-					}
-				}
-
-				//计算第二小的代价值
-				
-				for (int w = 0; w < width; w++)
-				{
-					if ((cost_map_right.at<float>(row, w) <0.01)||(w==col-best_disparity))//如果右边视差为0，跳过该点，最佳视差点也跳过
-					{
-						continue;
-					}
-					else
-					{
-						float temp_value = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, w));
-						if (temp_value < sec_min_cost)
-						{
-							sec_min_cost = temp_value;
-							sec_best_disparity = col - w;
-							//point = Point2f(k, row);
-						}
-					}
-				}
-				if (fabs(min_cost_value - sec_min_cost) < 5)//如果最小代价值和次最小代价值的差异不是特别大，则视为无效视差<<<视差唯一性>>>
-				{
-					continue;//视为无效视差，直接跳过
-				}
-				else
-				{
-					map_disparity_left.at<float>(row, col) = best_disparity;
-				}
-
-			}
-		}
-	}
-
-	for (int row = 0; row < height; row++)//右相机视差图
-	{
-		//计算右相机视差图的时候，由于重合区域在两边，需要进行水平镜像翻转
-		Mat remap_cost_map_left = Mat::zeros(cost_map_left.size(), CV_32FC1);
-		Mat remap_cost_map_right = Mat::zeros(cost_map_left.size(), CV_32FC1);
-		for (int col = 0; col < width; col++)//进行镜像翻转
-		{
-			for (int row = 0; row < height; row++)
-			{
-				remap_cost_map_left.at<float>(row, col) = cost_map_left.at<float>( row, width - col-1);//水平镜像翻转
-				remap_cost_map_right.at<float>(row, col) = cost_map_right.at<float>(row, width - col-1);
-			}
-		}
-		int start_coordinate = 0;//如果（row,col）的视差为d=col-k(row,k)，则（row,col+1）的视差一定在(row,k)的右边。
-
-		for (int col = 0; col < width; col++)
-		{
-			if (remap_cost_map_right.at<float>(row, col) < 0.01)
-			{
-				continue;
-			}
-			else
-			{
-				float min_cost_value = 20000;//随便指定的一个比较大的数
-				float best_disparity = 0;
-				float sec_min_cost = 20000;
-				float sec_best_disparity = 0;
-
-
-				for (int k = start_coordinate; k < width; k++)//在同一个y坐标进行最佳视差搜索
-				{
-					if (remap_cost_map_left.at<float>(row, k) < 0.01)//如果左边代价为0，跳过该点
-					{
-						continue;
-					}
-					else
-					{
-						float temp_value = fabs(remap_cost_map_right.at<float>(row, col) - remap_cost_map_left.at<float>(row, k));
-						if (temp_value < min_cost_value)
-						{
-							min_cost_value = temp_value;
-							best_disparity = col - k;
-							//point = Point2f(k, row);
-							
-						}
-					}
-				}
-
-				//计算次最小的代价值
-
-				for (int w = 0; w < width; w++)
-				{
-					if ((remap_cost_map_left.at<float>(row, w) < 0.01) || (w == col - best_disparity))//如果左边视差为0或位于次最小代价值点，跳过该点
-					{
-						continue;
-					}
-					else
-					{
-						float temp_value = fabs(remap_cost_map_right.at<float>(row, col) - remap_cost_map_left.at<float>(row, w));
-						if (temp_value < sec_min_cost)
-						{
-							sec_min_cost = temp_value;
-							sec_best_disparity = col - w;
-							//point = Point2f(k, row);
-						}
-					}
-				}
-				if (fabs(min_cost_value - sec_min_cost) < 5)//如果最小代价值和次最小代价值的差异不是特别大，说明极有可能是收到噪声的污染，导致二者相近，则视为无效视差<<<视差唯一性>>>
-				{
-					continue;//视为无效视差，直接跳过
-				}
-				else
-				{
-					map_disparity_right.at<float>(row,width- col-1) = best_disparity;//再翻转回来
-				}
-
-			}
-		}
-	}
-
-	//左右一致性检查
-	for (int row = 0; row < height; row++)
-	{
-		
-		for (int col = 0; col < width; col++)
-		{
-			if (cost_map_left.at<float>(row, col) < 0.01)//忽略被掩膜的区域
-			{
-				continue;
-			}
-			else
-			{
-				float d_left = map_disparity_left.at<float>(row, col);
-				//float temp11 = width - (col - d_left);//由于镜像之后，左图视差右图对应d的坐标为temp11
-				float temp11 = col - d_left;
-				if ((temp11 > 0) && (temp11 < width))
-				{
-					float d_right = map_disparity_right.at<float>(row, temp11);
-					if (fabs(d_left - d_right) < 1)//满足左=右，说明视差是正确的
-					{
-						LRC_map_disparity_right.at<float>(row, col) = map_disparity_left.at<float>(row, col);
-					}
-				}
-			}
-		}
-	}
-
-					//视差精细化
-				 //   float c1 = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, col- best_disparity - 1));
-					//float c2 = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, col - best_disparity));
-					//float c3 = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, col - best_disparity + 1));
-					//float a = (c3 + c1 - 2 * c2);
-					//float precise_disparity = best_disparity - (c3 - c1) /2*a;
-
-
-	//下面是由视差图计算点云
-	for (int col = 0; col < width; col++)
-	{
-		for (int row = 0; row < height; row++)
-		{
-			if (LRC_map_disparity_right.at<float>(row, col) == 0)
-			{
-				continue;
-			}
-			else
-			{
-				//计算点云XYZ
-				pcl::PointXYZ tep_points;
-				Vec4d xyd1 = Vec4d(row, col, LRC_map_disparity_right.at<float>(row, col), 1);
-				Matx44d _Q;
-				Q.convertTo(_Q, CV_64F);
-				Vec4d XYZW = _Q * xyd1;
-				tep_points.x = XYZW[0] / XYZW[3];
-				tep_points.y = XYZW[1] / XYZW[3];
-				tep_points.z = XYZW[2] / XYZW[3];
-				//points_cloud->points.push_back(tep_points);
-				points_cloud.points.push_back(tep_points);
-			}
-		
-		}
-	}
-
-
-				
-	/*points_cloud->width = points_cloud->points.size();
-	points_cloud->height = 1;
-	pcl::io::savePCDFile("cloud2.pcd", *points_cloud);*/
-	points_cloud .width = points_cloud .points.size();
-	points_cloud.height = 1;
-	pcl::io::savePCDFile("phone_SadUniquenessLrc.pcd", points_cloud);
-	//return points_cloud;
-}
-
-//得到Rank_transform的等级
-inline int Rank_value(float diff)
-{
-
-	int Crank = 0;
-	if (diff <= u)
-	{
-		if (diff > -u)     //-u<diff<=u
-		{
-			return 0;
-		}
-		else
-		{
-			if (diff <= -v)   //diff<=-v
-			{
-				return -2;
-			}
-			else                 //-v<diff<=u
-			{
-				return -1;
-			}
-		}
-	}
-	else
-	{
-		if (diff >= v)     //diff>=v
-		{
-			return 2;
-		}
-		else                // u<diff<v
-		{
-			return 1;
-		}
-	}
-}
-
-
-/***********************************************AD-Rank-transform*************************************************************************/
-inline float compute_ad_rank_cost(int left_row, int left_col, int right_row, int right_col, Mat phase_left, Mat phase_right, int win_size)
-{
-	//bool left_out = (left_row - win_size / 2 <= 0) || (left_row + win_size / 2 >= phase_left.rows) || (left_col - win_size / 2 <= 0) || (left_col + win_size / 2 >= phase_left.cols);
-	//bool right_out = (right_row - win_size / 2 <= 0) || (right_row + win_size / 2 >= phase_right.rows) || (right_col - win_size / 2 <= 0) || (right_col + win_size / 2 >= phase_right.cols);
-	//if (left_out || right_out)
-	//{
-	//	return 0;
-	//}
-	int rank_number = 0;
-	float left_center = phase_left.at<float>(left_row, left_col);
-	float right_center = phase_right.at<float>(right_row, right_col);
-
-	float sad_diff = fabs(left_center - right_center);//AD值
-
-	for (int row = -win_size / 2; row < win_size / 2; row++)
-	{
-		for (int col = -win_size / 2; col < win_size / 2; col++)
-		{
-			float temp_value_left = phase_left.at<float>(left_row + row, left_col + col);
-
-			float temp_value_right = phase_right.at<float>(right_row + row, right_col + col);
-
-			float diff_left = temp_value_left - left_center;
-			float diff_right = temp_value_right - right_center;
-
-			if (Rank_value(diff_left) != Rank_value(diff_right))
-			{
-				rank_number++;
-			}
-		}
-	}
-	/*float temp_cost = sad_diff / LMADA_AD;
-	float temp_cost1 = temp_cost + (rank_number / LMADA_RANK);
-	return temp_cost1;*/
-	float temp_cost = 1 - exp(-sad_diff / LMADA_AD);
-	temp_cost += 1 - exp(-rank_number / LMADA_RANK);
-	return temp_cost;
-}
-
-/***********************************************AD-Census代价计算**********************************************************************/
-inline float compute_ad_census_cost(int left_row, int left_col, int right_row, int right_col, Mat phase_left, Mat phase_right, int win_size)
-{
-	//bool left_out = (left_row - win_size / 2 <= 0) || (left_row + win_size / 2 >= phase_left.rows) || (left_col - win_size / 2 <= 0) || (left_col + win_size / 2 >= phase_left.cols);
-	//bool right_out = (right_row - win_size / 2 <= 0) || (right_row + win_size / 2 >= phase_right.rows) || (right_col - win_size / 2 <= 0) || (right_col + win_size / 2 >= phase_right.cols);
-	//if (left_out || right_out)
-	//{
-	//	return 0;
-	//}
-	int census_number = 0;
-	float left_center = phase_left.at<float>(left_row, left_col);
-	float right_center = phase_right.at<float>(right_row, right_col);
-
-	float sad_diff = fabs(left_center - right_center);
-	for (int row = -win_size / 2; row < win_size / 2; row++)
-	{
-		for (int col = -win_size / 2; col < win_size / 2; col++)
-		{
-			float temp_value_left = phase_left.at<float>(left_row + row, left_col + col);
-
-			float temp_value_right = phase_right.at<float>(right_row + row, right_col + col);
-			bool diff = (temp_value_left - left_center)*(temp_value_right - right_center) < 0;
-			census_number += (diff) ? 1 : 0;
-		}
-	}
-	float temp_cost = 1 - exp(-sad_diff / LMADA_AD);
-	temp_cost += 1 - exp(-census_number / LMADA_CENSUS);
-	return temp_cost;
-
-}
-
-
-
-/**********************************************************************
-/*
-* 这个是只有SAD，没有唯一性检测和LRC
-* 
-*************************************************************************/
-
-Mat phaseSad2PcdSadonly(const Mat &_phase_left, const Mat &_phase_right, int sad_win_size = 5)
-{
-	Mat phase_left = _phase_left.clone();
-	Mat phase_right = _phase_right.clone();
-
-	int width = phase_left.cols;
-	int height = phase_left.rows;
-
-	Mat disparity = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
-
-	/****************由于SAD的特殊性，先聚合再匹配****************************************************************/
-	for (int row = 0; row < height; row++){
-		for (int col = 0; col < width; col++){
-			/***************************************************************************************/
-			//这一步是必须的，因为在下面sum取窗口的时候会出错，输入的相位图在小于0的像素值为-4.32×10^8，求和就不对了
-			if (phase_left.at<float>(row, col) < 0.01){
-				phase_left.at<float>(row, col) = 0;
-			}
-			if (phase_right.at<float>(row, col) < 0.01){
-				phase_right.at<float>(row, col) = 0;
-			}
-		}
-	}
-
-	//针对上述问题，把左右两幅图像的聚合改为各自聚合
-	for (int row = sad_win_size / 2; row < height- sad_win_size / 2; row++){
-		for (int col = sad_win_size / 2; col < width- sad_win_size / 2; col++){
-			if (phase_left.at<float>(row,col)<0.01){//如果处于边界或像素值为0，则跳过
-				continue;
-			}
-			else{
-				Mat kernel_left = phase_left(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
-				Scalar temp_left = sum(kernel_left);
-				phase_left.at<float>(row, col) = temp_left[0];
-			}
-		}
-	}
-
-	for (int row = 0; row < height; row++){
-		for (int col = 0; col < width; col++){
-			/*计算右边的SAD，先聚合*/
-			bool out = ((row - sad_win_size / 2) <= 0 || (row + sad_win_size / 2) >= height || (col - sad_win_size / 2) <= 0 || (col + sad_win_size / 2) >= width);
-			bool zero_right = (phase_right.at<float>(row, col) < 0.01);
-			if (out || zero_right){//如果处于边界或像素值为0，则跳过
-				continue;
-			}
-			else{
-				Mat kernel_right = phase_right(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
-				Scalar temp_right = sum(kernel_right);
-				cost_map_right.at<float>(row, col) = temp_right[0];
-			}
-		}
-	}
-
-	/*****************************************下面开始计算视差***********************************/
-	for (int row = 0; row < height; row++){//左相机视差图{
-		int start_coordinate = 0;//如果（row,col）的视差为d=col-k(row,k)，则（row,col+1）的视差一定在(row,k)的右边。
-		for (int col = 0; col < width; col++){
-			if (cost_map_left.at<float>(row, col) < 0.01){
-				continue;
-			}
-			else{
-				float min_cost_value = 20000;//随便指定的一个比较大的数
-				float best_disparity = 0;
-				int a = row;
-				int b = col;
-				for (int k = start_coordinate; k < width; k++){//在同一个y坐标进行最佳视差搜索
-					if (cost_map_right.at<float>(row, k) < 0.01){//如果右边视差为0，跳过该点
-						continue;
-					}
-					else{
-						float temp_value = fabs(cost_map_left.at<float>(row, col) - cost_map_right.at<float>(row, k));
-						if (temp_value < min_cost_value){
-							min_cost_value = temp_value;
-							best_disparity = col - k;
-						}
-					}
-				}
-				if (best_disparity != 0){
-					LRC_map_disparity_right.at<float>(row, col) = best_disparity;
-				}
-			}		
-		}
-	}
-
-	return LRC_map_disparity_right;
+	pcl::io::savePCDFile(file_name + ".pcd", points_cloud);
 }
 
 
