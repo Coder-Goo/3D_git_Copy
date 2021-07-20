@@ -799,38 +799,6 @@ void CalculatePointCloud(const Mat &disparity,const Mat & phase_left,const Mat &
 }
 
 
-//亚像素视差精细化
-//float GetPreciseDisparity(int best_disparity,int row,int col )
-//{
-//		float precise_disparity;
-//		int i;
-//		if (best_disparity == 0)//如果最佳视差为0，那么它位于正负视差交界处，需特殊处理
-//		{
-//			float c1 = vec_aggregation_maps[0][1].at<float>(row, col);
-//			float c2 = vec_aggregation_maps[0][0].at<float>(row, col);
-//			float c3 = vec_aggregation_maps[1][1].at<float>(row, col);
-//			precise_disparity = -(c3 - c1) / (c3 + c1 - 2 * c2) / 2;
-//		}
-//		else
-//		{
-//			bool temp = (best_disparity > 0);
-//			switch (temp)
-//			{
-//			case true:
-//				i = 1;
-//			case false:
-//				i = 0;
-//			default:
-//				cout << "视差精细化错误" << endl;
-//			}
-//			float c1 = vec_aggregation_maps[i][best_disparity - 1].at<float>(row, col);
-//			float c2 = vec_aggregation_maps[i][best_disparity].at<float>(row, col);
-//			float c3 = vec_aggregation_maps[i][best_disparity + 1].at<float>(row, col);
-//			precise_disparity = best_disparity - (c3 - c1) / (c3 + c1 - 2 * c2) / 2;
-//		}
-//
-//		return precise_disparity;
-//}
 
 ///**********************************************************************************************************
 //* 第三版计算视差的函数 ，代价计算使用SAD+CENSUS
@@ -1679,43 +1647,6 @@ inline float compute_ad_census_cost(int left_row, int left_col, int right_row, i
 }
 
 
-//使用tangulapoints来计算点云
-void UsingTrangulPoints()
-{
-		////+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		//	/************************************************************************
-		//	* 第一版输出点云的方法，使用triangulatePoints
-		//	* 使用了自己后面定义的两个函数computeSAD（） 和  Q2pcd（）
-		//	***************************************************************************
-		//	*/
-			//输入两张相位图和SAD窗口大小，得到两个vector，里面是点对
-			//vector<Point2f>vecL;
-			//vector<Point2f>vecR;
-			//clock_t startTime6, endTime6;
-			//startTime6 = clock();
-
-			// computeSAD(L_phase, R_phase, vecL, vecR, Size(7, 7));
-
-			//endTime6 = clock();
-			//cout << "SAD匹配成功" << endl;
-			//cout << "SAD时间：" << double((endTime6 - startTime6) / CLOCKS_PER_SEC) << endl;
-
-			//Mat P1, P2;
-			//Mat point4D( 4, vecL.size(), CV_32F);
-
-			//fin["P1"] >> P1;
-			//fin["P2"] >> P2;
-
-			//clock_t startTime7, endTime7;
-			//startTime7 = clock();
-			////计算出Point4D矩阵，该函数为opencv自带API
-			//triangulatePoints(P1, P2, vecL, vecR, point4D);
-			//endTime7 = clock();
-			//cout << "triangulate时间：" << double((endTime7- startTime7) / CLOCKS_PER_SEC) << endl;
-			//string saveLoad = "triangulatePoints.pcd";
-			//Q2pcd(point4D, saveLoad);
-			//cout << "成功输出点云" << endl;
-}
 
 /**********************************************************************
 /*
@@ -1723,17 +1654,16 @@ void UsingTrangulPoints()
 * 
 *************************************************************************/
 
-void phaseSad2PcdSadonly(Mat phase_left, Mat phase_right, Mat Q )
+Mat phaseSad2PcdSadonly(const Mat &_phase_left, const Mat &_phase_right, int sad_win_size = 5)
 {
-	Mat cost_map_left = Mat::zeros(phase_left.size(), CV_32FC1);
-	Mat cost_map_right = Mat::zeros(phase_left.size(), CV_32FC1);
+	Mat phase_left = _phase_left.clone();
+	Mat phase_right = _phase_right.clone();
+
 	int width = phase_left.cols;
 	int height = phase_left.rows;
-	int sad_win_size = 5;
 
-	Mat LRC_map_disparity_right = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
+	Mat disparity = Mat::zeros(phase_left.size(), CV_32FC1);//;左右一致性检查后的视差图
 
-	pcl::PointCloud<pcl::PointXYZ>points_cloud;
 	/****************由于SAD的特殊性，先聚合再匹配****************************************************************/
 	for (int row = 0; row < height; row++){
 		for (int col = 0; col < width; col++){
@@ -1747,19 +1677,17 @@ void phaseSad2PcdSadonly(Mat phase_left, Mat phase_right, Mat Q )
 			}
 		}
 	}
+
 	//针对上述问题，把左右两幅图像的聚合改为各自聚合
-	for (int row = 0; row < height; row++){
-		for (int col = 0; col < width; col++){
-			bool out = ((row - sad_win_size / 2) <= 0 || (row + sad_win_size / 2) >= height || (col - sad_win_size / 2) <= 0 || (col + sad_win_size / 2) >= width);
-			/*计算左边的SAD,由于SAD的特殊性，先聚合再相减*/
-			bool zero_left = (phase_left.at<float>(row, col) < 0.01);
-			if (out || zero_left){//如果处于边界或像素值为0，则跳过
+	for (int row = sad_win_size / 2; row < height- sad_win_size / 2; row++){
+		for (int col = sad_win_size / 2; col < width- sad_win_size / 2; col++){
+			if (phase_left.at<float>(row,col)<0.01){//如果处于边界或像素值为0，则跳过
 				continue;
 			}
 			else{
 				Mat kernel_left = phase_left(Rect(col - sad_win_size / 2, row - sad_win_size / 2, sad_win_size, sad_win_size));
 				Scalar temp_left = sum(kernel_left);
-				cost_map_left.at<float>(row, col) = temp_left[0];
+				phase_left.at<float>(row, col) = temp_left[0];
 			}
 		}
 	}
@@ -1783,7 +1711,6 @@ void phaseSad2PcdSadonly(Mat phase_left, Mat phase_right, Mat Q )
 	/*****************************************下面开始计算视差***********************************/
 	for (int row = 0; row < height; row++){//左相机视差图{
 		int start_coordinate = 0;//如果（row,col）的视差为d=col-k(row,k)，则（row,col+1）的视差一定在(row,k)的右边。
-
 		for (int col = 0; col < width; col++){
 			if (cost_map_left.at<float>(row, col) < 0.01){
 				continue;
@@ -1811,253 +1738,12 @@ void phaseSad2PcdSadonly(Mat phase_left, Mat phase_right, Mat Q )
 			}		
 		}
 	}
-	//下面是由视差图计算点云
-	for (int col = 0; col < width; col++){
-		for (int row = 0; row < height; row++){
-			if (LRC_map_disparity_right.at<float>(row, col) == 0){
-				continue;
-			}
-			else{
-				//计算点云XYZ
-				pcl::PointXYZ tep_points;
-				Vec4d xyd1 = Vec4d(row, col, LRC_map_disparity_right.at<float>(row, col), 1);
-				Matx44d _Q;
-				Q.convertTo(_Q, CV_64F);
-				Vec4d XYZW = _Q * xyd1;
-				tep_points.x = XYZW[0] / XYZW[3];
-				tep_points.y = XYZW[1] / XYZW[3];
-				tep_points.z = XYZW[2] / XYZW[3];
-				//points_cloud->points.push_back(tep_points);
-				points_cloud.points.push_back(tep_points);
-			}
-		}
-	}
-	points_cloud.width = points_cloud.points.size();
-	points_cloud.height = 1;
-	pcl::io::savePCDFile("phone_Sad_only.pcd", points_cloud);
-	getchar();
+
+	return LRC_map_disparity_right;
 }
 
 
 
-
-/******************************************************************************************
-*function:第一版用trianguPoints时使用的SAD计算点对的函数
-*input: left---左相机相位图
-*       right---右相机相位图
-*       vecL----使用引用输出左相机的点
-*       vecR----使用引用输出右相机的点
-*       winSize---SAD窗口的大小
-*output:
-history:2020.7.25
-********************************************************************************************/
-//输入左右相位图片和SAD窗口大小（一般取7x7)，得到对应的左右点集vecL,vecR
-void computeSAD(Mat &left, Mat&right, vector<Point2f>&vecL, vector<Point2f>&vecR, Size winSize)
-{
-	Mat cost_map_left = Mat::zeros(left.size(), CV_32FC1);
-	Mat cost_map_right = Mat::zeros(left.size(), CV_32FC1);
-	//由于SAD得特殊性，先聚合再算差进行匹配
-	for (int row = 0; row < left.rows; row++)
-	{
-		for (int col = 0; col < left.cols; col++)
-		{
-			/***************************************************************************************/
-			//这一步是必须的，因为在下面sum取窗口的时候会出错，输入的相位图在小于0的像素值为-4.32×10^8，求和就不对了
-			if (left.at<float>(row, col) < 0.01)
-			{
-				left.at<float>(row, col) = 0;
-			}
-			if (right.at<float>(row, col) < 0.01)
-			{
-				right.at<float>(row, col) = 0;
-			}
-		}
-	}
-			/****************************************************************************************************/
-	for (int row = 0; row < left.rows; row++)
-	{
-		for (int col = 0; col < left.cols; col++)
-		{
-			bool out = ((row - winSize.height / 2) <= 0 || (row + winSize.height / 2) >= left.rows || (col - winSize.height / 2) <= 0 || (col + winSize.height / 2) >= left.cols);
-
-			/*计算左边的SAD,由于SAD的特殊性，先聚合再相减*/
-			bool zero_left = (left.at<float>(row, col) < 0.01);//用<0.01代替==0比较好
-			if (out || zero_left)//如果处于边界或像素值为0，则跳过
-			{
-				continue;
-			}
-			else
-			{
-
-				Mat kernel_left = left(Rect(col - winSize.height / 2, row - winSize.height / 2, winSize.height, winSize.width));
-				Scalar temp_left = sum(kernel_left);
-				float value = temp_left[0];
-				cost_map_left.at<float>(row, col) = temp_left[0];
-			}
-
-		}
-	}
-	for (int row = 0; row < left.rows; row++)
-	{
-		for (int col = 0; col < left.cols; col++)
-		{
-			bool out = ((row - winSize.height / 2) <= 0 || (row + winSize.height / 2) >= left.rows || (col - winSize.height / 2) <= 0 || (col + winSize.height / 2) >= left.cols);
-			/*计算右边的SAD，先聚合*/
-			bool zero_right = (right.at<float>(row, col) < 0.01);
-			if (out || zero_right)//如果处于边界或像素值为0，则跳过
-			{
-				continue;
-			}
-			else
-			{
-				Mat kernel_right = right(Rect(col - winSize.height / 2, row - winSize.height / 2, winSize.height, winSize.width));
-				Scalar temp_right = sum(kernel_right);
-				cost_map_right.at<float>(row, col) = temp_right[0];
-			}
-		}
-	}
-	for (int col = 0; col < left.cols; col++)
-	{
-		for (int row = 0; row < left.rows; row++)
-		{
-			if (cost_map_left.at<float>(row, col) < 0.01)//代价图左图视差为零，跳过
-			{
-				continue;
-			}
-			else
-			{
-				int best_disparity = 0;
-				float value = 10000;
-
-				for (int k = 0; k < right.cols; k++)
-				{
-					if (cost_map_right.at<float>(row, k) < 0.01)//如果代价图右图的值为零，跳过
-					{
-						continue;
-					}
-					else
-					{
-						float temp_value = fabs(cost_map_right.at<float>(row, k) - cost_map_left.at<float>(row, col));
-						if (temp_value < value)
-						{
-							value = temp_value;
-							best_disparity = col - k;
-						/*	int a = row;
-							int b = col;
-							int c = 0;
-						*/
-						}
-						else
-						{
-							continue;
-						}
-					}
-				}
-
-				vecL.push_back(Point2f(col, row));
-				vecR.push_back(Point2f(col - best_disparity, row));
-
-			}
-		}
-	}
-	
-	
-	//下面是我第一遍写得，取窗口再计算差，再聚合，贼慢
-	//for (float i = winSize.width; i < left.cols - winSize.width; i++)
-	//{
-	//	for (float j = winSize.height; j < left.rows - winSize.height; j++)
-	//	{
-	//		if (left.at<float>(j, i) < 0.01)//像素值为零，直接跳过匹配
-	//		{
-	//			continue;
-	//		}
-	//		else
-	//		{
-	//			map<float, Point>minPoint;
-	//			for (float k = winSize.width; k < right.cols - winSize.width; k++)
-	//			{
-	//				if (right.at<float>(j, k) < 0.01)
-	//				{
-	//					continue;
-	//				}
-	//				else
-	//				{
-	//					Mat kernel_L = Mat(winSize, CV_32FC1, Scalar(0));
-	//					Mat kernel_R = Mat(winSize, CV_32FC1, Scalar(0));
-	//					kernel_L = left(Rect(i - winSize.width / 2, j - winSize.height / 2, winSize.width, winSize.height));
-	//					kernel_R = right(Rect(k - winSize.width / 2, j - winSize.height / 2, winSize.width, winSize.height));
-	//					Mat difference;
-	//					::absdiff(kernel_L, kernel_R, difference);
-	//					Scalar D = sum(difference);
-	//					float  aaa = D[0];
-	//					minPoint.insert(make_pair(aaa, Point(k, j)));
-
-	//				}
-	//			}
-	//			if (minPoint.empty())
-	//			{
-	//				continue;
-	//			}
-	//			else
-	//			{
-	//				map<float, Point>::iterator iter = minPoint.begin();
-	//				Point tempMinPoint = iter->second;
-	//				float temNum = iter->first;
-	//				for (map<float, Point>::iterator it = minPoint.begin(); it != minPoint.end(); it++)
-	//				{
-	//					if (it->first < temNum)
-	//					{
-	//						tempMinPoint = it->second;
-	//					}
-	//					else
-	//					{
-	//						continue;
-	//					}
-	//				}
-	//				minPoint.clear();
-	//				vecL.push_back(Point(i, j));
-	//				vecR.push_back(tempMinPoint);
-	//			}
-	//		}
-
-	//	}
-	//}
-}
-
-
-/******************************************************************************************
-*function:第一版用trianguPoints时使用的点云输出函数
-*input: Point4D---是trianguPoint输出的Q矩阵
-*       pcdFileName---是pcd点云的保存路径
-*output:输出PCD点云到磁盘
-history:2020,7.25
-********************************************************************************************/
-void Q2pcd(Mat Point4D, string pcdFileName)//Q为trigulatepoints输出的4xN的矩阵，这个函数把Q矩阵转化为PCD文件
-{
-	pcl::PointCloud < pcl::PointXYZ > cloud;
-	cloud.width = Point4D.cols;
-	cloud.height = 1;
-	cloud.points.resize(cloud.width*cloud.height);
-
-	float*Q_row1 = Point4D.ptr<float>(0);
-	float*Q_row2 = Point4D.ptr<float>(1);
-	float*Q_row3 = Point4D.ptr<float>(2);
-	float*Q_row4 = Point4D.ptr<float>(3);
-	for (int i = 0; i < Point4D.cols; i++)
-	{
-		float point3D_data4 = *(Q_row4 + i);
-		float point3D_data1 = *(Q_row1 + i) / point3D_data4;
-		float point3D_data2 = *(Q_row2 + i) / point3D_data4;
-		float point3D_data3 = *(Q_row3 + i) / point3D_data4;
-		if (i < cloud.points.size())
-		{
-			cloud.points[i].x = point3D_data1;
-			cloud.points[i].y = point3D_data2;
-			cloud.points[i].z = point3D_data3;
-		}
-	}
-	pcl::io::savePCDFileASCII(pcdFileName, cloud);
-}
 
 
 
