@@ -24,7 +24,7 @@ string calib_file_name = "./Calibdata.xml";
 
 int main()
 {
-	bool dsi = false;
+	bool dsi = true;
 	bool sad = true;
 	Mat Q;     //投影矩阵Q
 	//CalibrationImage();//标定
@@ -69,260 +69,6 @@ int main()
 	return 0;
 }
 
-//标定
-int CalibrationImage()
-{
-	clock_t startTime, endTime;
-	startTime = clock();
-	/************************************************先读入标定图片***********************************************/
-	ifstream left_file("./calibration_recify/标定图片索引/左相机的标定图片.txt");//输入的左相机的标定图片
-	ifstream right_file("./calibration_recify/标定图片索引/右相机的标定图片.txt");//输入的右相机的标定图片
-	vector<vector<Point2f>>image_point_vecL;//用来存储左相机检测的点
-	vector<vector<Point2f>>image_point_vecR;//用来存储右相机检测的点
-	Size nei_jiaodian_number = Size(qipan_cornor_x, qipan_cornor_y);//内角点数
-	Size square_size = Size(qipan_size_x, qipan_size_y);//棋盘格大小
-	vector<vector<Point3f>>object_point_vec;//用来存储棋盘的点
-	if (!left_file)//判断是否正确读入标定图片
-	{
-	cout << "左相机图片输入流错误";
-	return 1;
-	}
-	if (!right_file)
-	{
-	cout << "右相机图片输入流文档错误";
-	return  1;
-	}
-
-	//使用cornerSubPix和drawCorner（这两个函数在read_file()中定义）来画出角点。得到三个vector向量用于标定
-
-	 Size imageSize = read_file(left_file, image_point_vecL, object_point_vec, nei_jiaodian_number, square_size);
-	 object_point_vec.clear();
-	 imageSize = read_file(right_file, image_point_vecR, object_point_vec, nei_jiaodian_number, square_size);
-	  endTime = clock();
-	  cout << image_point_vecL.size() << endl;
-	  cout << "read_file函数得到标定点用时：" << double((endTime - startTime) / CLOCKS_PER_SEC) << "s" << endl;
-	 //cout << image_point_vecR.size()<< endl;
-	//**********************************************下面进行标定**************************************
-	 clock_t startTime1, endTime1;
-	 startTime1 = clock();
-	 Calibration calibration(calib_file_name,image_point_vecL,image_point_vecR,object_point_vec,imageSize);
-	 calibration.calibration();//完成标定和矫正,输出标定参数到yml文件中。
-     endTime1 = clock();
-     cout << "标定用时：" << double((endTime1 - startTime1) / CLOCKS_PER_SEC) << "s" << endl;
-	 return 0;
-}
-//计算相位图
-int CalculatePhaseImage(Mat &phase_left ,Mat &phase_right)
-{
-	/********************************************下面进行相位图矫正***********************************/
-//**********************************************先读入相位图片************************************
-	ifstream left_phase("./phase_unwrapping/图片索引/左相机条纹图片.txt");//输入的相位图片
-	ifstream right_phase("./phase_unwrapping/图片索引/右相机条纹图片.txt");//输入的相位图片
-	if (!left_phase)
-	{
-		cout << "输入左图像错误" << endl;
-		return 1;
-	}
-	if (!right_phase)
-	{
-		cout << "输入右图像错误" << endl;
-		return 1;
-	}
-	/************************************************制作mask*********************************/
-	Mat src1 = imread("./phase_unwrapping/IMAGES/L0.bmp");
-	Mat src2 = imread("./phase_unwrapping/IMAGES/R0.bmp");
-	Mat src11, src22;
-	cvtColor(src1, src11, COLOR_BGR2GRAY);
-	cvtColor(src2, src22, COLOR_BGR2GRAY);
-
-	Mat src111, src222;
-	threshold(src11, src111, 50, 255, THRESH_BINARY|THRESH_OTSU);
-	threshold(src22, src222, 50, 255, THRESH_BINARY | THRESH_OTSU);
-
-
-	/*********************************************************以前是用了开运算和闭运算，这样会使细节轮廓扩大或减小，8、*//////////////
-	//对Mask进行开运算，消除噪点
-	Mat mask_L;
-	Mat mask_R;
-	Mat element = getStructuringElement(MORPH_RECT, Size(5, 5));
-	morphologyEx(src111, mask_L, MORPH_OPEN, element);
-	morphologyEx(src222, mask_R, MORPH_OPEN, element);
-	imwrite("./phase_unwrapping/mask_l.bmp", mask_L);
-	imwrite("./phase_unwrapping/mask_R.bmp", mask_R);
-	//imshow("mask_L", mask_L);//试验过这两个mask没有问题
-	//imshow("mask_R", mask_R);
-	//waitKey(50);
-	//getchar();
-
-	//制作mask 
-	/*******************************制作mask结束*******************************************************************/
-
-	/******************************读入相位图片****************************************************************/
-	vector<Mat>left_img;
-	vector<Mat>right_img;
-	while (!left_phase.eof())
-	{
-		string str;
-		getline(left_phase, str);
-		Mat src = imread(str);
-		Mat srcTepL;
-		/*imshow("输入的图片", src);
-		waitKey();*/
-		src.copyTo(srcTepL, mask_L);
-		/*imshow("mask之后的图片", srcTepL2);
-		waitKey();*/
-		left_img.push_back(srcTepL.clone());
-		string str_right;
-		getline(right_phase, str_right);
-		Mat dst = imread(str_right);
-		Mat srcTepR;
-		dst.copyTo(srcTepR, mask_R);
-		right_img.push_back(srcTepR.clone());
-	}
-
-	if (right_img.size() != 12)
-	{
-		cout << "vector中读入的图片数量错误" << endl;
-		return 1;
-	}
-	if (left_img.empty())
-	{
-		cout << "左相机相位图片vector为空" << endl;
-		return 1;
-	}
-	/********************************************下面开始矫正***************************************************/
-	clock_t startTime2, endTime2;
-
-	Mat map11, map12, map21, map22;
-	FileStorage fin(calib_file_name, FileStorage::READ);
-	fin["map11"] >> map11;
-	fin["map12"] >> map12;
-	fin["map21"] >> map21;
-	fin["map22"] >> map22;
-	startTime2 = clock();
-	vector<Mat>leftImg;
-	vector<Mat>rightImg;
-	leftImg.resize(12);
-	rightImg.resize(12);
-	for (int i = 0; i < left_img.size(); i++)
-	{
-		remap(left_img[i], leftImg[i], map11, map12, INTER_LINEAR);
-		remap(right_img[i], rightImg[i], map21, map22, INTER_LINEAR);
-	}
-	Mat mask_L1, mask_R1;
-	remap(mask_L, mask_L1, map11, map12, INTER_LINEAR);
-	remap(mask_R, mask_R1, map21, map22, INTER_LINEAR);
-
-	endTime2 = clock();
-	cout << "rectify矫正用时：" << double((endTime2 - startTime2) / CLOCKS_PER_SEC) << "s" << endl;
-
-	//***********************画极线判断是否成功矫正**********************************************************//
-
-	
-	/*Mat src_tep1 = leftImg[1];
-	Mat src_tep2 = rightImg[1];
-	imshow("src1", src_tep1);
-	imshow("src2", src_tep2);
-	Size halfSize = Size(src_tep1.cols / 2, src_tep1.rows / 2);
-	Mat src_half, src_half2;
-	resize(src_tep1, src_half, halfSize);
-	resize(src_tep2, src_half2, halfSize);
-
-	Mat dst(Size(src_half.cols+ src_half2.cols, src_half.rows), CV_32FC3);
-	src_half.colRange(0, src_half.cols).copyTo(dst.colRange(0, src_half.cols));
-	src_half2.colRange(0, src_half2.cols).copyTo(dst.colRange(src_half.cols, dst.cols));
-
-	for (int i = 20; i < dst.rows; i += 16)
-	{
-		line(dst,Point(1, i), Point(dst.cols,i), Scalar(0, 255, 00), 1, 8, 0);
-	}
-	Mat dst1111;
-	dst.convertTo(dst1111, CV_8U);
-	imshow("dst", dst1111);
-	waitKey(500);
-	cout << "成功输出极线" << endl;*/
-
-	/************************************画极线结束**************************************************/
-
-
-	/*******************************************下面开始解相位*******************************************/
-	clock_t startTime3, endTime3;
- 	startTime3 = clock();
-
-	//自己写的解相方法
-	/*Phase_Unwrapping L_phase_wrap(leftImg, mask_L1);
-	Mat L_phase = L_phase_wrap.phase_unwrapping();
-	Phase_Unwrapping R_phase_wrap(rightImg, mask_R1);
-	Mat R_phase = R_phase_wrap.phase_unwrapping();*/
-
-	//师兄的解相方法
-	PhaseUnwrapping2 L_phase_wrap;
-    Mat L_phase = L_phase_wrap.PhaseUnwrapping3Frequency4step(leftImg, mask_L1);
-	PhaseUnwrapping2 R_phase_wrap;
-	Mat R_phase = R_phase_wrap.PhaseUnwrapping3Frequency4step(rightImg, mask_R1);
-
-	endTime3 = clock();
-	cout << "解相位用时：" << double((endTime3 - startTime3) / CLOCKS_PER_SEC) << "s" << endl;
-	/***********************************用来显示看是否正确,得先把图片变为uint类型*************************************/
-
-	FileStorage fout("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_left.xml", FileStorage::WRITE);
-	fout <<"L_phase"<< L_phase;
-	fout.release();
-	FileStorage fout1("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_right.xml", FileStorage::WRITE);
-	fout1 <<"R_phase"<< R_phase;
-	fout1.release();
-
-	//Mat L_phase1, R_phase1;
-	//L_phase.convertTo(L_phase1, CV_8U);
-
-	//R_phase.convertTo(R_phase1, CV_8U);
-
-	//imshow("L_phase", L_phase1);
-	//waitKey(500);
-	//imshow("R_phase", R_phase1);
-	//waitKey(500);
-
-	//int a = 0;
-/*************************************************************写出相位图***************************************/
-/**********************************用sobel算子看看相位图的梯度************************************************/
-//for (int row = 0; row < L_phase.rows; row++)
-//{
-//	for (int col = 0; col < L_phase.cols; col++)
-//	{
-//		if (L_phase.at<float>(row, col) < 0.01)
-//		{
-//			L_phase.at<float>(row, col) == 0;
-//		}
-//	}
-//}
-//for (int row = 0; row < L_phase.rows; row++)
-//{
-//	for (int col = 0; col < L_phase.cols; col++)
-//	{
-//		if (R_phase.at<float>(row, col) < 0.01)
-//		{
-//			R_phase.at<float>(row, col) == 0;
-//		}
-//	}
-//}
-//Mat grad_x, grad_y;
-//Sobel(L_phase, grad_x, -1, 1, 0, 3, 1, 1, BORDER_DEFAULT);
-//Sobel(R_phase, grad_y, -1, 1, 0, 3, 1, 1, BORDER_DEFAULT);
-
-//int a = 0;
-/*************************************************************************************************************/
-
-/*imwrite("D:\\VS文件\\匹配main程序\\匹配main程序\\L_phase.bmp", L_phase1);
-imwrite("D:\\VS文件\\匹配main程序\\匹配main程序\\R_phase.bmp", R_phase1);*/
-	if (L_phase.depth() == CV_64FC1) {
-		L_phase.convertTo(phase_left, CV_32FC1);
-		R_phase.convertTo(phase_right, CV_32FC1);
-		return 0;
-	}
-	phase_left = L_phase.clone();
-	phase_right = R_phase.clone();
-	return 0;
-}
 
 //AD+THRESHOLD
 Mat ADCalculateDisparity( const Mat &phase_left,const  Mat &phase_right)
@@ -513,6 +259,259 @@ void CalculatePointCloud(const Mat &disparity, const Mat & phase_left, const Mat
 
 
 
+//标定
+int CalibrationImage()
+{
+	clock_t startTime, endTime;
+	startTime = clock();
+	/************************************************先读入标定图片***********************************************/
+	ifstream left_file("./calibration_recify/标定图片索引/左相机的标定图片.txt");//输入的左相机的标定图片
+	ifstream right_file("./calibration_recify/标定图片索引/右相机的标定图片.txt");//输入的右相机的标定图片
+	vector<vector<Point2f>>image_point_vecL;//用来存储左相机检测的点
+	vector<vector<Point2f>>image_point_vecR;//用来存储右相机检测的点
+	Size nei_jiaodian_number = Size(qipan_cornor_x, qipan_cornor_y);//内角点数
+	Size square_size = Size(qipan_size_x, qipan_size_y);//棋盘格大小
+	vector<vector<Point3f>>object_point_vec;//用来存储棋盘的点
+	if (!left_file)//判断是否正确读入标定图片
+	{
+		cout << "左相机图片输入流错误";
+		return 1;
+	}
+	if (!right_file)
+	{
+		cout << "右相机图片输入流文档错误";
+		return  1;
+	}
+
+	//使用cornerSubPix和drawCorner（这两个函数在read_file()中定义）来画出角点。得到三个vector向量用于标定
+
+	Size imageSize = read_file(left_file, image_point_vecL, object_point_vec, nei_jiaodian_number, square_size);
+	object_point_vec.clear();
+	imageSize = read_file(right_file, image_point_vecR, object_point_vec, nei_jiaodian_number, square_size);
+	endTime = clock();
+	cout << image_point_vecL.size() << endl;
+	cout << "read_file函数得到标定点用时：" << double((endTime - startTime) / CLOCKS_PER_SEC) << "s" << endl;
+	//cout << image_point_vecR.size()<< endl;
+   //**********************************************下面进行标定**************************************
+	clock_t startTime1, endTime1;
+	startTime1 = clock();
+	Calibration calibration(calib_file_name, image_point_vecL, image_point_vecR, object_point_vec, imageSize);
+	calibration.calibration();//完成标定和矫正,输出标定参数到yml文件中。
+	endTime1 = clock();
+	cout << "标定用时：" << double((endTime1 - startTime1) / CLOCKS_PER_SEC) << "s" << endl;
+	return 0;
+}
+//计算相位图
+int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
+{
+	/********************************************下面进行相位图矫正***********************************/
+//**********************************************先读入相位图片************************************
+	ifstream left_phase("./phase_unwrapping/图片索引/左相机条纹图片.txt");//输入的相位图片
+	ifstream right_phase("./phase_unwrapping/图片索引/右相机条纹图片.txt");//输入的相位图片
+	if (!left_phase)
+	{
+		cout << "输入左图像错误" << endl;
+		return 1;
+	}
+	if (!right_phase)
+	{
+		cout << "输入右图像错误" << endl;
+		return 1;
+	}
+	/************************************************制作mask*********************************/
+	Mat src1 = imread("./phase_unwrapping/IMAGES/L0.bmp");
+	Mat src2 = imread("./phase_unwrapping/IMAGES/R0.bmp");
+	Mat src11, src22;
+	cvtColor(src1, src11, COLOR_BGR2GRAY);
+	cvtColor(src2, src22, COLOR_BGR2GRAY);
+
+	Mat src111, src222;
+	threshold(src11, src111, 50, 255, THRESH_BINARY | THRESH_OTSU);
+	threshold(src22, src222, 50, 255, THRESH_BINARY | THRESH_OTSU);
+
+
+	/*********************************************************以前是用了开运算和闭运算，这样会使细节轮廓扩大或减小，8、*//////////////
+	//对Mask进行开运算，消除噪点
+	Mat mask_L;
+	Mat mask_R;
+	Mat element = getStructuringElement(MORPH_RECT, Size(5, 5));
+	morphologyEx(src111, mask_L, MORPH_OPEN, element);
+	morphologyEx(src222, mask_R, MORPH_OPEN, element);
+	imwrite("./phase_unwrapping/mask_l.bmp", mask_L);
+	imwrite("./phase_unwrapping/mask_R.bmp", mask_R);
+	//imshow("mask_L", mask_L);//试验过这两个mask没有问题
+	//imshow("mask_R", mask_R);
+	//waitKey(50);
+	//getchar();
+
+	//制作mask 
+	/*******************************制作mask结束*******************************************************************/
+
+	/******************************读入相位图片****************************************************************/
+	vector<Mat>left_img;
+	vector<Mat>right_img;
+	while (!left_phase.eof())
+	{
+		string str;
+		getline(left_phase, str);
+		Mat src = imread(str);
+		Mat srcTepL;
+		/*imshow("输入的图片", src);
+		waitKey();*/
+		src.copyTo(srcTepL, mask_L);
+		/*imshow("mask之后的图片", srcTepL2);
+		waitKey();*/
+		left_img.push_back(srcTepL.clone());
+		string str_right;
+		getline(right_phase, str_right);
+		Mat dst = imread(str_right);
+		Mat srcTepR;
+		dst.copyTo(srcTepR, mask_R);
+		right_img.push_back(srcTepR.clone());
+	}
+
+	if (right_img.size() != 12)
+	{
+		cout << "vector中读入的图片数量错误" << endl;
+		return 1;
+	}
+	if (left_img.empty())
+	{
+		cout << "左相机相位图片vector为空" << endl;
+		return 1;
+	}
+	/********************************************下面开始矫正***************************************************/
+	clock_t startTime2, endTime2;
+
+	Mat map11, map12, map21, map22;
+	FileStorage fin(calib_file_name, FileStorage::READ);
+	fin["map11"] >> map11;
+	fin["map12"] >> map12;
+	fin["map21"] >> map21;
+	fin["map22"] >> map22;
+	startTime2 = clock();
+	vector<Mat>leftImg;
+	vector<Mat>rightImg;
+	leftImg.resize(12);
+	rightImg.resize(12);
+	for (int i = 0; i < left_img.size(); i++)
+	{
+		remap(left_img[i], leftImg[i], map11, map12, INTER_LINEAR);
+		remap(right_img[i], rightImg[i], map21, map22, INTER_LINEAR);
+	}
+	Mat mask_L1, mask_R1;
+	remap(mask_L, mask_L1, map11, map12, INTER_LINEAR);
+	remap(mask_R, mask_R1, map21, map22, INTER_LINEAR);
+
+	endTime2 = clock();
+	cout << "rectify矫正用时：" << double((endTime2 - startTime2) / CLOCKS_PER_SEC) << "s" << endl;
+
+	//***********************画极线判断是否成功矫正**********************************************************//
+
+
+	/*Mat src_tep1 = leftImg[1];
+	Mat src_tep2 = rightImg[1];
+	imshow("src1", src_tep1);
+	imshow("src2", src_tep2);
+	Size halfSize = Size(src_tep1.cols / 2, src_tep1.rows / 2);
+	Mat src_half, src_half2;
+	resize(src_tep1, src_half, halfSize);
+	resize(src_tep2, src_half2, halfSize);
+
+	Mat dst(Size(src_half.cols+ src_half2.cols, src_half.rows), CV_32FC3);
+	src_half.colRange(0, src_half.cols).copyTo(dst.colRange(0, src_half.cols));
+	src_half2.colRange(0, src_half2.cols).copyTo(dst.colRange(src_half.cols, dst.cols));
+
+	for (int i = 20; i < dst.rows; i += 16)
+	{
+		line(dst,Point(1, i), Point(dst.cols,i), Scalar(0, 255, 00), 1, 8, 0);
+	}
+	Mat dst1111;
+	dst.convertTo(dst1111, CV_8U);
+	imshow("dst", dst1111);
+	waitKey(500);
+	cout << "成功输出极线" << endl;*/
+
+	/************************************画极线结束**************************************************/
+
+
+	/*******************************************下面开始解相位*******************************************/
+	clock_t startTime3, endTime3;
+	startTime3 = clock();
+
+	//自己写的解相方法
+	/*Phase_Unwrapping L_phase_wrap(leftImg, mask_L1);
+	Mat L_phase = L_phase_wrap.phase_unwrapping();
+	Phase_Unwrapping R_phase_wrap(rightImg, mask_R1);
+	Mat R_phase = R_phase_wrap.phase_unwrapping();*/
+
+	//师兄的解相方法
+	PhaseUnwrapping2 L_phase_wrap;
+	Mat L_phase = L_phase_wrap.PhaseUnwrapping3Frequency4step(leftImg, mask_L1);
+	PhaseUnwrapping2 R_phase_wrap;
+	Mat R_phase = R_phase_wrap.PhaseUnwrapping3Frequency4step(rightImg, mask_R1);
+
+	endTime3 = clock();
+	cout << "解相位用时：" << double((endTime3 - startTime3) / CLOCKS_PER_SEC) << "s" << endl;
+	/***********************************用来显示看是否正确,得先把图片变为uint类型*************************************/
+
+	FileStorage fout("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_left.xml", FileStorage::WRITE);
+	fout << "L_phase" << L_phase;
+	fout.release();
+	FileStorage fout1("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_right.xml", FileStorage::WRITE);
+	fout1 << "R_phase" << R_phase;
+	fout1.release();
+
+	//Mat L_phase1, R_phase1;
+	//L_phase.convertTo(L_phase1, CV_8U);
+
+	//R_phase.convertTo(R_phase1, CV_8U);
+
+	//imshow("L_phase", L_phase1);
+	//waitKey(500);
+	//imshow("R_phase", R_phase1);
+	//waitKey(500);
+
+	//int a = 0;
+/*************************************************************写出相位图***************************************/
+/**********************************用sobel算子看看相位图的梯度************************************************/
+//for (int row = 0; row < L_phase.rows; row++)
+//{
+//	for (int col = 0; col < L_phase.cols; col++)
+//	{
+//		if (L_phase.at<float>(row, col) < 0.01)
+//		{
+//			L_phase.at<float>(row, col) == 0;
+//		}
+//	}
+//}
+//for (int row = 0; row < L_phase.rows; row++)
+//{
+//	for (int col = 0; col < L_phase.cols; col++)
+//	{
+//		if (R_phase.at<float>(row, col) < 0.01)
+//		{
+//			R_phase.at<float>(row, col) == 0;
+//		}
+//	}
+//}
+//Mat grad_x, grad_y;
+//Sobel(L_phase, grad_x, -1, 1, 0, 3, 1, 1, BORDER_DEFAULT);
+//Sobel(R_phase, grad_y, -1, 1, 0, 3, 1, 1, BORDER_DEFAULT);
+
+//int a = 0;
+/*************************************************************************************************************/
+/*imwrite("D:\\VS文件\\匹配main程序\\匹配main程序\\L_phase.bmp", L_phase1);
+imwrite("D:\\VS文件\\匹配main程序\\匹配main程序\\R_phase.bmp", R_phase1);*/
+	if (L_phase.depth() == CV_64FC1) {
+		L_phase.convertTo(phase_left, CV_32FC1);
+		R_phase.convertTo(phase_right, CV_32FC1);
+		return 0;
+	}
+	phase_left = L_phase.clone();
+	phase_right = R_phase.clone();
+	return 0;
+}
 
 
 
