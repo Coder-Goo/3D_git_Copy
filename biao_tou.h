@@ -30,4 +30,7 @@
 
 //#define INVALID_VALUE 
 
+
+#define PAPER       //是否输出论文里需要的图
 #endif 
+

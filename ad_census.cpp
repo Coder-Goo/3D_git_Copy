@@ -36,7 +36,7 @@ void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, c
 				float* cost_map_ptr = vec_cost_maps[i][d].ptr<float>(row);
 				for (int col = half_win_size + 1; col < width - half_win_size - 1; col++) {//两次循环，对相位图进行逐像素
 					
-					if (left_ptr[col] < 0.01) {//如果左相位图的像素值为0，跳过匹配
+					if (left_ptr[col] < 0.01) { //如果左相位图的像素值为0，跳过匹配
 						continue;
 					}
 					else {
@@ -72,7 +72,7 @@ void CostAggregation(bool fixed_window, vector<vector<Mat>>&vec_cost_maps, vecto
 
 	for (int i = 0; i < vec_cost_maps.size(); i++) {
 		for (int j = 0; j < vec_cost_maps[i].size(); j++) {
-			vec_aggregation_maps[i][j] = Mat::zeros(phase_left.size(), CV_32FC1);//指定每个视差图的大小
+			vec_aggregation_maps[i][j] = Mat(phase_left.rows, phase_left.cols, CV_32FC1, DEFAULT_DISPARITY);//指定每个视差图的大小
 		}
 	}
 
@@ -196,57 +196,49 @@ void CalculateRightDsi(vector<vector<Mat>>&vec_right_dsi, const vector<vector<Ma
 //由聚合的DSI计算视差
 Mat DisparityCalculation(const vector<vector<Mat>>&vec_maps, const Mat &phase_left, const Mat &phase_right)
 {
-	Mat disparity;
+	
 	clock_t time_disparity_computation_start, time_disparity_computation_end;
 	time_disparity_computation_start = clock();
-	disparity = Mat::zeros(phase_left.size(), CV_32FC1);
 
-	Mat cost_map = Mat::zeros(phase_left.size(), CV_32FC1);
-
+	Mat disparity = Mat(phase_left.size(), CV_32FC1, DEFAULT_DISPARITY);
+	Mat temp_cost_map = Mat(phase_left.rows, phase_left.cols, CV_32FC1, 10000);
 	const int height = phase_left.rows;
 	const int width = phase_left.cols;
 	//视差计算
 	int d_length = 0;
 	int best_disparity = INVALID_DISPARITY;
 
-	for (int row = 0; row < height; row++) {
-		for (int col = 0; col < width; col++) {
-			float cost_value = 1000000;
-			if (phase_left.at<float>(row, col) < 0.01) {
-				continue;
-			}
-			else {
-				for (int i = 0; i < 2; i++) {
-					if (i == 0) {
-						d_length = abs(min_disparity);
-					}
+
+	for (int i = 0; i < 2; i++) {
+		if (i == 0) d_length = abs(min_disparity);
+		else d_length = abs(max_disparity);
+		for (int d = 0; d <= d_length; d++) {
+			for (int row = 0; row < height; row++) {
+				const float* cost_ptr = vec_maps[i][d].ptr<float>(row);
+				const float* left_phase_ptr = phase_left.ptr<float>(row);
+				float* temp_cost_ptr = temp_cost_map.ptr<float>(row);
+				float* disparity_ptr = disparity.ptr<float>(row);
+				for (int col = 0; col < width; col++) {
+					if (left_phase_ptr[col] < 0.001) continue;
 					else {
-						d_length = abs(max_disparity);
-					}
-					for (int d = 0; d < d_length; d++) {
-						if ((vec_maps[i][d].at<float>(row, col) < 0.00001)) {
-							continue;
-						}
+						if (cost_ptr[col] < 0.01) continue;
 						else {
-							if (vec_maps[i][d].at<float>(row, col) < cost_value) {
-								cost_value = vec_maps[i][d].at<float>(row, col);
-								if (i == 0) {
-									best_disparity = -d;
-								}
-								else {
-									best_disparity = d;
-								}
+							if (cost_ptr[col] < temp_cost_ptr[col]) {
+								temp_cost_ptr[col] = cost_ptr[col];
+								if (i == 0) disparity_ptr[col] = -d;
+								else disparity_ptr[col] = d;
 							}
 						}
 					}
 				}
 			}
-			////////////////////////////////////////////////////////////////////////
-			if (best_disparity == INVALID_DISPARITY) {//如果视差仍属于初始值，那么应该是位于无效区域
-				continue;
-			}
-			disparity.at<float>(row, col) = best_disparity;//没哟进行视差精细化
-
+		}
+	}
+	
+	time_disparity_computation_end = clock();
+	std::cout << "从DSI得到视差图用时：" << double((time_disparity_computation_end - time_disparity_computation_start) / CLOCKS_PER_SEC) << endl;
+	return disparity.clone();
+}
 /******************************************************视差精细化**********************************************/
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -291,12 +283,6 @@ Mat DisparityCalculation(const vector<vector<Mat>>&vec_maps, const Mat &phase_le
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /****************************************************视差精细化结束**************************************************************/
-		}
-	}
-	time_disparity_computation_end = clock();
-	std::cout << "从DSI得到视差图用时：" << double((time_disparity_computation_end - time_disparity_computation_start) / CLOCKS_PER_SEC) << endl;
-	return disparity.clone();
-}
 
 
 

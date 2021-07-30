@@ -24,16 +24,19 @@ string calib_file_name = "./Calibdata.xml";
 
 int main()
 {
-	bool dsi = true;
-	bool sad = true;
+	//AD-CENSUS还是有问题的
+	bool dsi = false;
+	bool sad = false;
 	Mat Q;     //投影矩阵Q
-	//CalibrationImage();//标定
+	CalibrationImage();//标定
 	FileStorage fin(calib_file_name, FileStorage::READ);
 	fin["Q"] >> Q;
 	//cout << Q << endl;
 
   	Mat phase_left,phase_right;//左右相位图
-	vector<vector<Mat>>vec_cost_maps,vec_aggregation_maps,vec_aggregation_right_maps;
+	vector<vector<Mat>>vec_cost_maps; //代价DSI
+	vector<vector<Mat>>vec_aggregation_maps;//聚合DSI
+	vector<vector<Mat>>vec_aggregation_right_maps;//右边的DSI
 	Mat left_disparity,right_disparity;
 	
 	std::cout << CalculatePhaseImage(phase_left, phase_right) << endl;//解相位
@@ -42,12 +45,11 @@ int main()
 	{
 		CostCalculation(vec_cost_maps, phase_left, phase_right, cost_window_size);
 		CostAggregation(fixed_window, vec_cost_maps, vec_aggregation_maps, phase_left, phase_right, aggeragation_window_size);
-		vector<vector<Mat>>right_dsi;
-		CalculateRightDsi(right_dsi, vec_aggregation_maps,phase_left,phase_right);
+		/*vector<vector<Mat>>right_dsi;
+		CalculateRightDsi(right_dsi, vec_aggregation_maps,phase_left,phase_right);*/
 		left_disparity=DisparityCalculation( vec_aggregation_maps, phase_left, phase_right);
 		//right_disparity= DisparityCalculation(right_dsi, phase_left, phase_right);
-		int a = 0;
-		
+		pcd_file_name = "AD-CENSUS点云";
 		CalculatePointCloud(left_disparity, phase_left, Q, pcd_file_name);
 	}
 	else//不使用DSI计算视差图
@@ -107,6 +109,11 @@ Mat ADCalculateDisparity( const Mat &phase_left,const  Mat &phase_right)
 	}
 	time_end = clock();
 	std::cout << "从AD计算得到视差图用时：" << double((time_end - time_start) / CLOCKS_PER_SEC) << endl;
+
+#ifdef PAPER
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/disparity.bmp", disparity);
+#endif
+
 	return disparity;
 }
 
@@ -124,19 +131,6 @@ Mat phaseSad2PcdSadonly(const Mat &phase_left, const Mat &phase_right, int sad_w
 	Mat disparity(height, width, CV_32FC1, DEFAULT_DISPARITY);
 	Mat aggre_phase_left = Mat::zeros(phase_left.size(), CV_32FC1);
 	Mat aggre_phase_right = Mat::zeros(phase_left.size(), CV_32FC1);
-	/****************由于SAD的特殊性，先聚合再匹配****************************************************************/
-	//for (int row = 0; row < height; row++){
-	//	for (int col = 0; col < width; col++){
-	//		/***************************************************************************************/
-	//		//这一步是必须的，因为在下面sum取窗口的时候会出错，输入的相位图在小于0的像素值为-4.32×10^8，求和就不对了
-	//		if (phase_left.at<float>(row, col) < 0.01){
-	//			phase_left.at<float>(row, col) = 0;
-	//		}
-	//		if (phase_right.at<float>(row, col) < 0.01){
-	//			phase_right.at<float>(row, col) = 0;
-	//		}
-	//	}
-	//}
 
 	//针对上述问题，把左右两幅图像的聚合改为各自聚合
 	Mat kernel;
@@ -175,24 +169,32 @@ Mat phaseSad2PcdSadonly(const Mat &phase_left, const Mat &phase_right, int sad_w
 				if (left_ptr[col] < 0.01)  continue;
 
 				float min_cost_value = 20000;//随便指定的一个比较大的数
+				float temp_value = 0;
 				int best_disparity = DEFAULT_DISPARITY;
 				for (int k = 0; k < width; k++){//在同一个y坐标进行最佳视差搜索
-					if (right_ptr[k] < 0.01){//如果右边视差为0，跳过该点
-						continue;
-					}
-					else{
-						float temp_value = fabs(left_ptr[col]- right_ptr[col]);
+					if (right_ptr[k] > 0.01){//如果右边视差为0，跳过该点
+						temp_value = fabs(left_ptr[col]- right_ptr[k]);
 						if (temp_value < min_cost_value){
 							min_cost_value = temp_value;
 							best_disparity = col - k;
 						}
 					}
 				}
-				if (best_disparity != DEFAULT_DISPARITY){
-					disparity.at<float>(row, col) = best_disparity;
+				if (best_disparity != DEFAULT_DISPARITY && min_cost_value < 1){
+					disparity_ptr[col] = best_disparity;
 				}		
 		}
 	}
+
+	/**********下面输出看结果**********/
+	/*FileStorage fout("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/aggregation_phase_left.xml", FileStorage::WRITE);
+	fout << "L_phase" << aggre_phase_left;
+	fout.release();
+	FileStorage fout1("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/aggregation_phase_right.xml", FileStorage::WRITE);
+	fout1 << "R_phase" << aggre_phase_right;
+	fout1.release();*/
+
+
 	time_end = clock();
 	std::cout << "从SAD计算得到视差图用时：" << double((time_end - time_start) / CLOCKS_PER_SEC) << endl;
 	return disparity;
@@ -339,6 +341,11 @@ int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
 	morphologyEx(src222, mask_R, MORPH_OPEN, element);
 	imwrite("./phase_unwrapping/mask_l.bmp", mask_L);
 	imwrite("./phase_unwrapping/mask_R.bmp", mask_R);
+
+#ifdef PAPER
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/mask_L.bmp", mask_L);
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/mask_R.bmp", mask_R);
+#endif
 	//imshow("mask_L", mask_L);//试验过这两个mask没有问题
 	//imshow("mask_R", mask_R);
 	//waitKey(50);
@@ -359,8 +366,10 @@ int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
 		/*imshow("输入的图片", src);
 		waitKey();*/
 		src.copyTo(srcTepL, mask_L);
-		/*imshow("mask之后的图片", srcTepL2);
+		/*imshow("mask之后的图片", srcTepL);
 		waitKey();*/
+
+		
 		left_img.push_back(srcTepL.clone());
 		string str_right;
 		getline(right_phase, str_right);
@@ -368,6 +377,11 @@ int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
 		Mat srcTepR;
 		dst.copyTo(srcTepR, mask_R);
 		right_img.push_back(srcTepR.clone());
+
+#ifdef PAPER
+		imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/left_image_masked.bmp", srcTepL);
+		imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/right_image_masked.bmp", srcTepR);
+#endif
 	}
 
 	if (right_img.size() != 12)
@@ -399,12 +413,19 @@ int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
 		remap(left_img[i], leftImg[i], map11, map12, INTER_LINEAR);
 		remap(right_img[i], rightImg[i], map21, map22, INTER_LINEAR);
 	}
+
+#ifdef PAPER
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/rectified_right1.bmp", rightImg[0]);
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/rectified_left1.bmp", leftImg[0]);
+#endif
+
 	Mat mask_L1, mask_R1;
 	remap(mask_L, mask_L1, map11, map12, INTER_LINEAR);
 	remap(mask_R, mask_R1, map21, map22, INTER_LINEAR);
 
 	endTime2 = clock();
 	cout << "rectify矫正用时：" << double((endTime2 - startTime2) / CLOCKS_PER_SEC) << "s" << endl;
+
 
 	//***********************画极线判断是否成功矫正**********************************************************//
 
@@ -453,14 +474,21 @@ int CalculatePhaseImage(Mat &phase_left, Mat &phase_right)
 
 	endTime3 = clock();
 	cout << "解相位用时：" << double((endTime3 - startTime3) / CLOCKS_PER_SEC) << "s" << endl;
+
+
+#ifdef PAPER
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/left_phase.bmp", L_phase);
+	imwrite("E:/科研/论文/改师兄的论文/论文/流程图片集/right_phase.bmp", R_phase);
+#endif
+
 	/***********************************用来显示看是否正确,得先把图片变为uint类型*************************************/
 
-	FileStorage fout("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_left.xml", FileStorage::WRITE);
-	fout << "L_phase" << L_phase;
-	fout.release();
-	FileStorage fout1("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_right.xml", FileStorage::WRITE);
-	fout1 << "R_phase" << R_phase;
-	fout1.release();
+	//FileStorage fout("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_left.xml", FileStorage::WRITE);
+	//fout << "L_phase" << L_phase;
+	//fout.release();
+	//FileStorage fout1("C:\\Program Files\\MATLAB\\R2016b\\bin\\StereoMatching/phase_right.xml", FileStorage::WRITE);
+	//fout1 << "R_phase" << R_phase;
+	//fout1.release();
 
 	//Mat L_phase1, R_phase1;
 	//L_phase.convertTo(L_phase1, CV_8U);

@@ -18,14 +18,10 @@ const double color_threshold3 = 0.2;
 const int maxlength1 = 9;
 const int maxlength2 = 5;//maxlength2<maxlength1«“color_threshold1>color_threshold
 
-						 //rank„–÷µ
-const float u = 0.2;
-const float v = 0.35;//…Ë÷√v=0.6,u=0.3
 const int INVALID_DISPARITY = 6550;
 
 const bool ad_census = true;
-const bool ad_rank = false;
-const bool fixed_window = true;
+const bool fixed_window = false;
 
 inline float compute_ad_census_cost(int& left_row, int& left_col, int &right_row, int& right_col,const  Mat &phase_left, const  Mat &phase_right,const uchar &win_size);
 

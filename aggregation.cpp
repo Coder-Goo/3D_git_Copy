@@ -20,12 +20,12 @@ Aggregation::Aggregation(const Mat &leftImage, const Mat &rightImage, double col
 	this->leftLimits.resize(2);
 	this->rightLimits.resize(2);
 
-	for (uchar imageNo = 0; imageNo < 2; imageNo++)
+	for (uchar imageNo = 0; imageNo < 2; imageNo++)  //  imageNo分别表示左右相机的图片
 	{
-		upLimits[imageNo] = ComputeLimits(-1, 0, imageNo);
-		downLimits[imageNo] = ComputeLimits(1, 0, imageNo);
-		leftLimits[imageNo] = ComputeLimits(0, -1, imageNo);
-		rightLimits[imageNo] = ComputeLimits(0, 1, imageNo);
+		upLimits[imageNo]=( ComputeLimits(-1, 0, imageNo));
+		downLimits[imageNo] = ( ComputeLimits(1, 0, imageNo));
+		leftLimits[imageNo] = ( ComputeLimits(0, -1, imageNo));
+		rightLimits[imageNo] = (ComputeLimits(0, 1, imageNo));
 	}
 	//Mat right= rightLimits[0];
 	//Mat left= leftLimits[0];
@@ -38,71 +38,71 @@ Aggregation::Aggregation(const Mat &leftImage, const Mat &rightImage, double col
 Mat Aggregation::Aggregation2D( Mat &costMap, bool horizontalFirst, uchar imageNo)
 {
 	int directionH = 1, directionW = 0; 
-
-	if (horizontalFirst)
-		std::swap(directionH, directionW);
-
-	Mat windowsSizes = Mat::ones(imgSize, CV_32S);
-
+	if (horizontalFirst) std::swap(directionH, directionW);
+	Mat windowsSizes = Mat::ones(imgSize, CV_8UC1);
 	for (uchar direction = 0; direction < 2; direction++)//先把水平的集合起来，再把竖直的集合 起来得到最终的代价值
 	{
 		(Aggregation_1D(costMap, directionH, directionW, windowsSizes, imageNo)).copyTo(costMap);
 		std::swap(directionH, directionW);
 	}
-
 	for (size_t h = 0; h < imgSize.height; h++)
 	{
+		float*cost_ptr = costMap.ptr<float>(h);
+		float*win_ptr = windowsSizes.ptr<float>(h);
 		for (size_t w = 0; w < imgSize.width; w++)
 		{
-			costMap.at<float>(h, w) /= windowsSizes.at<int>(h, w);//复合赋值,因为沿着极线扫描的时候，右边的窗口大小不一致,所以要除以
+			cost_ptr[w] /= win_ptr[w];//复合赋值,因为沿着极线扫描的时候，右边的窗口大小不一致,所以要除以
 			//窗口的大小
 		}
 	}
-	return costMap.clone();
-	
+	return costMap.clone();  
 }
 
 Mat Aggregation::Aggregation_1D(const Mat &costMap, int directionH, int directionW, Mat &windowSizes, uchar imageNo)
 {
-	Mat tmpWindowSizes = Mat::zeros(imgSize, CV_32S);
+	Mat temp1 = leftLimits[imageNo];
+	Mat temp2 = rightLimits[imageNo];
+
+	Mat tmpWindowSizes = Mat::zeros(imgSize, CV_8UC1);
 	Mat aggregatedCosts(imgSize, CV_32F);
-	int dmin, dmax, d;
-	int h, w;
-	for (h = 0; h < imgSize.height; h++)
-	{
-		for (w = 0; w < imgSize.width; w++)
-		{
-			if (costMap.at<float>(h, w) < 0.001)//如果左相位图位于空白区域，则跳过
+	int H = imgSize.height, W = imgSize.width;
+	for (int h = 0; h < H; h++){
+		float*phase_left_ptr = images[0].ptr<float>(h);
+		const float* cost_map_ptr = costMap.ptr<float>(h);
+		int *left_limit_ptr = leftLimits[imageNo].ptr<int>(h);
+		int * right_limit_ptr = rightLimits[imageNo].ptr<int>(h);
+		int *up_limit_ptr = upLimits[imageNo].ptr<int>(h);
+		int *down_limit_ptr = downLimits[imageNo].ptr<int>(h);
+		int * temp_win_size_ptr = tmpWindowSizes.ptr<int>(h);
+		int * win_size_ptr = windowSizes.ptr<int>(h);
+		float* aggre_cost_ptr = aggregatedCosts.ptr<float>(h);
+
+		for (int w = 0; w < W; w++){
+			if (phase_left_ptr[w] <0.01 || cost_map_ptr[w] < 0.001)//如果左相位图位于空白区域，则跳过
 			{
 				continue;
 			}
-			else
-			{
-				
-					if (directionH == 0)
-					{
-						dmin = -leftLimits[imageNo].at<int>(h, w);
-						dmax = rightLimits[imageNo].at<int>(h, w);
+			else{				
+					if (directionH == 0){  //计算水平方向
+						float cost = 0.0;
+						for (int d = -left_limit_ptr[w]; d <= right_limit_ptr[w]; d++) {
+							//cout << w + d * directionW;
+							cost += cost_map_ptr[w + d * directionW];
+							temp_win_size_ptr[ w] += win_size_ptr[ w + d * directionW];
+						}
+						aggre_cost_ptr[w] = cost;
 					}
-					else
-					{
-						dmin = -upLimits[imageNo].at<int>(h, w);
-						dmax = downLimits[imageNo].at<int>(h, w);
+					else{
+						float cost = 0;
+						for ( int d = -up_limit_ptr[w]; d <= down_limit_ptr[w]; d++) {
+							cost += costMap.at<float>(h + d * directionH, w);
+							temp_win_size_ptr[ w] += windowSizes.at<int>(h + d * directionH, w );
+						}
+						aggre_cost_ptr[w] = cost;
 					}
-
-					float cost = 0;
-					for (d = dmin; d <= dmax; d++)
-					{
-						cost += costMap.at<float>(h + d * directionH, w + d * directionW);
-						tmpWindowSizes.at<int>(h, w) += windowSizes.at<int>(h + d * directionH, w + d * directionW);
-					}
-					aggregatedCosts.at<float>(h, w) = cost;
-				
 			}
-			
 		}
 	}
-
 	tmpWindowSizes.copyTo(windowSizes);
 
 	return aggregatedCosts.clone();
@@ -112,24 +112,29 @@ Mat Aggregation::Aggregation_1D(const Mat &costMap, int directionH, int directio
 
 Mat Aggregation::ComputeLimits(int directionH, int directionW, int imageNo)//计算臂长值
 {
-	Mat limits(imgSize, CV_32S);
-	int h, w;
-	for (h = 0; h < imgSize.height; h++)
+	Mat limits = Mat::zeros(imgSize, CV_8UC1 );
+	Mat temp = images[imageNo];
+	int H = limits.rows;
+	int W = limits.cols;
+	for (int h = 0; h < H; h++)
 	{
-		for (w = 0; w < imgSize.width; w++)
+		float* images_ptr = images[imageNo].ptr<float>(h);
+		float*limits_ptr= limits.ptr<float>(h);
+
+		for (int w = 0; w < W; w++)
 		{
-			if (images[imageNo].at<float>(h, w) < 0.01)//如果左图像中该像素点为0；则直接返回臂长为0
+			if (images_ptr[w] < 0.01)//如果相位图中该像素点为0；则直接返回臂长为0
 			{
-				limits.at<int>(h, w) = 0.0;
+				limits_ptr[w] = 0;
 				continue;
 			}
 			else
 			{
-				limits.at<int>(h, w) = ComputeLimit(h, w, directionH, directionW, imageNo);//这个函数返回的是臂长值减一
+				limits_ptr[w] = ComputeLimit(h, w, directionH, directionW, imageNo);//这个函数返回的是臂长值减一
 			}
 		}
 	}
-	return limits.clone();
+	return limits;
 }
 
 int Aggregation::ComputeLimit(int height, int width, int directionH, int directionW, uchar imageNo)
