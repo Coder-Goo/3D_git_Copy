@@ -10,20 +10,20 @@ using namespace cv;
 class Aggregation
 {
 public:
-	Aggregation(const Mat &leftImage, const Mat &rightImage, double colorThreshold1, double colorThreshold2,double colorThreshold3,
-		uint maxLength1, uint maxLength2);
+	Aggregation(const Mat &leftImage, const Mat &rightImage, double phase_threshold_v, double phase_threshold_h, uint length_v, uint length_h);
 	/*int Match();*/
 	Mat Aggregation2D(Mat &costMap, bool horizontalFirst, uchar imageNo);
 	//void GetLimits(vector<Mat> &upLimits, vector<Mat> &downLimits, vector<Mat> &leftLimits, vector<Mat> &rightLimits) const;
 private:
 	Mat images[2];
-	Size imgSize;
-	double colorThreshold1, colorThreshold2,colorThreshold3;
-	uint maxLength1, maxLength2;
+
+	double phase_threshold_v, phase_threshold_h;
+	uint length_v, length_h;
 	vector<Mat> upLimits;
 	vector<Mat> downLimits;
 	vector<Mat> leftLimits;
 	vector<Mat> rightLimits;
+	int H, W;
 
 
 	int ComputeLimit(int height, int width, int directionH, int directionW, uchar imageNo);//计算臂长的函数
@@ -34,4 +34,8 @@ private:
 };
 
 #endif
+
+
+
+
 

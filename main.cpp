@@ -25,10 +25,10 @@ string calib_file_name = "./Calibdata.xml";
 int main()
 {
 	//AD-CENSUS还是有问题的
-	bool dsi = false;
+	bool dsi = true;
 	bool sad = false;
 	Mat Q;     //投影矩阵Q
-	CalibrationImage();//标定
+	//CalibrationImage();//标定
 	FileStorage fin(calib_file_name, FileStorage::READ);
 	fin["Q"] >> Q;
 	//cout << Q << endl;

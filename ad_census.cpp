@@ -15,7 +15,7 @@ void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, c
 
 	for (int i = 0; i < vec_cost_maps.size(); i++) {
 		for (int j = 0; j < vec_cost_maps[i].size(); j++) {
-			vec_cost_maps[i][j] = Mat(phase_left.rows,phase_left.cols, CV_32FC1, DEFAULT_DISPARITY);//指定每个视差图的大小
+			vec_cost_maps[i][j] = Mat(phase_left.rows,phase_left.cols, CV_32FC1, DEFAULT_DISPARITY);
 		}
 	}
 	int half_win_size = cost_window_size / 2;
@@ -34,14 +34,14 @@ void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, c
 				const float* left_ptr = phase_left.ptr<float>(row);
 				const float* right_ptr = phase_right.ptr<float>(row);
 				float* cost_map_ptr = vec_cost_maps[i][d].ptr<float>(row);
-				for (int col = half_win_size + 1; col < width - half_win_size - 1; col++) {//两次循环，对相位图进行逐像素
+				for (int col = half_win_size + 1; col < width - half_win_size - 1; col++) {
 					
 					if (left_ptr[col] < 0.01) { //如果左相位图的像素值为0，跳过匹配
 						continue;
 					}
 					else {
 						int col_r = (i == 0 ? col + d : col - d);
-						if (col_r <= half_win_size || col_r >= width - half_win_size)  continue;
+						if (col_r <= half_win_size || col_r >= width - half_win_size)  break;
 						else {
 
 							if (right_ptr[col_r]< 0.01) {
@@ -56,6 +56,8 @@ void CostCalculation(vector<vector<Mat>>&vec_cost_maps, const Mat &phase_left, c
 			}
 		}
 	}
+
+
 	time_cost_computation_end = clock();
 	std::cout << "代价计算用时：" << double((time_cost_computation_end - time_cost_computation_start) / CLOCKS_PER_SEC) << endl;
 }
@@ -115,7 +117,7 @@ void CostAggregation(bool fixed_window, vector<vector<Mat>>&vec_cost_maps, vecto
 	else {
 		clock_t time_ADaggregation_start, time_ADaggregation_end;
 		time_ADaggregation_start = clock();
-		Aggregation aggregation(phase_left, phase_right, color_threshold1, color_threshold2, color_threshold3, maxlength1, maxlength2);
+		Aggregation aggregation(phase_left, phase_right,phase_threshold_v, phase_threshold_h, length_v, length_h );
 		for (int i = 0; i < 2; i++) {//进行两次循环，一次正视差，一次负视差
 			int d_length = 0;
 			if (i == 0) {//第一次先进行负视差匹配
@@ -196,7 +198,6 @@ void CalculateRightDsi(vector<vector<Mat>>&vec_right_dsi, const vector<vector<Ma
 //由聚合的DSI计算视差
 Mat DisparityCalculation(const vector<vector<Mat>>&vec_maps, const Mat &phase_left, const Mat &phase_right)
 {
-	
 	clock_t time_disparity_computation_start, time_disparity_computation_end;
 	time_disparity_computation_start = clock();
 
@@ -209,15 +210,22 @@ Mat DisparityCalculation(const vector<vector<Mat>>&vec_maps, const Mat &phase_le
 	int best_disparity = INVALID_DISPARITY;
 
 
+	const float* cost_ptr = nullptr;
+	const float* left_phase_ptr = nullptr;
+	float* temp_cost_ptr =nullptr;
+	float* disparity_ptr = nullptr;
+
 	for (int i = 0; i < 2; i++) {
 		if (i == 0) d_length = abs(min_disparity);
 		else d_length = abs(max_disparity);
 		for (int d = 0; d <= d_length; d++) {
 			for (int row = 0; row < height; row++) {
-				const float* cost_ptr = vec_maps[i][d].ptr<float>(row);
-				const float* left_phase_ptr = phase_left.ptr<float>(row);
-				float* temp_cost_ptr = temp_cost_map.ptr<float>(row);
-				float* disparity_ptr = disparity.ptr<float>(row);
+
+				cost_ptr = vec_maps[i][d].ptr<float>(row);
+				left_phase_ptr = phase_left.ptr<float>(row);
+				temp_cost_ptr = temp_cost_map.ptr<float>(row);
+				disparity_ptr = disparity.ptr<float>(row);
+
 				for (int col = 0; col < width; col++) {
 					if (left_phase_ptr[col] < 0.001) continue;
 					else {
